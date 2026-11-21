@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import DEFAULT_LOCATION, APP_TITLE, APP_SUBTITLE, TIMEZONE, PORT, KAKAO_JS_API_KEY, KAKAO_REST_API_KEY
 from backend.database import init_db
 from backend.services.auth import authenticate_user, get_user_by_token, get_family_members_list
-from backend.services.location import update_user_location, get_family_locations
+from backend.services.location import update_user_location, get_family_locations, request_child_ping
 from backend.services.chat import get_chat_rooms, get_messages, send_message
 from backend.services.places import add_favorite_place, get_favorite_places, remove_favorite_place
 from backend.services.weather import get_weather_data
@@ -141,7 +141,27 @@ async def api_location_update(payload: dict = Body(...)):
     battery = int(payload.get("battery_level", 100))
     is_moving = bool(payload.get("is_moving", False))
 
-    res = await update_user_location(username, lat, lon, accuracy, battery, is_moving)
+    res = await update_user_location(username, lat, lon, accuracy, battery, is_moving, is_manual=False)
+    return res
+
+@app.post("/api/location/manual-set")
+async def api_location_manual_set(payload: dict = Body(...)):
+    """부모가 자녀의 현재 위치(장소/좌표)를 수동으로 지정/갱신"""
+    username = payload.get("username")
+    lat = float(payload.get("latitude", DEFAULT_LOCATION["lat"]))
+    lon = float(payload.get("longitude", DEFAULT_LOCATION["lon"]))
+    landmark = payload.get("landmark", "외부 장소")
+    battery = int(payload.get("battery_level", 85))
+
+    res = await update_user_location(username, lat, lon, accuracy=5.0, battery=battery, is_moving=False, is_manual=True, custom_landmark=landmark)
+    return res
+
+@app.post("/api/location/request-ping")
+async def api_location_request_ping(payload: dict = Body(...)):
+    """자녀에게 실시간 위치 전송 요청 톡 발송"""
+    child_username = payload.get("child_username", "도비사랑녀")
+    requester = payload.get("requester_name", "아빠")
+    res = await request_child_ping(child_username, requester)
     return res
 
 @app.get("/api/location/family")

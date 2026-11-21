@@ -94,16 +94,21 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS user_locations (
         username TEXT PRIMARY KEY,
-        latitude REAL NOT NULL,
-        longitude REAL NOT NULL,
+        latitude REAL,
+        longitude REAL,
         accuracy REAL,
         address TEXT,
         landmark TEXT,
-        battery_level INTEGER DEFAULT 100,
+        battery_level INTEGER,
         is_moving INTEGER DEFAULT 0,
+        is_manual INTEGER DEFAULT 0,
         updated_at TEXT NOT NULL
     )
     """)
+    try:
+        cursor.execute("ALTER TABLE user_locations ADD COLUMN is_manual INTEGER DEFAULT 0")
+    except Exception:
+        pass
 
     # 4. 가족 전용 실시간 채팅 메시지 테이블 (단체/1:1/다:1)
     cursor.execute("""
@@ -196,16 +201,7 @@ def init_db():
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (acc["username"], acc["name"], acc["role_title"], acc["role_type"], acc["avatar"], acc["avatar_color"], acc["grade"], acc["password_hash"], now_kst))
 
-    # 아이들 초기 안심 위치 기본값 시딩 (평내유진마젤란 인근)
-    for child in ["도비사랑녀", "미니미니채"]:
-        cursor.execute("SELECT username FROM user_locations WHERE username = ?", (child,))
-        if not cursor.fetchone():
-            cursor.execute("""
-            INSERT INTO user_locations (username, latitude, longitude, accuracy, address, landmark, battery_level, is_moving, updated_at)
-            VALUES (?, 37.6434558, 127.2311716, 15.0, '경기도 남양주시 평내동 평내유진마젤란', '집 (안심 구역)', 88, 0, ?)
-            """, (child, now_kst))
-
-    # 부모 초기 위치 시딩
+    # 부모 초기 위치 시딩 (기본 거점)
     for parent in ["미니미니", "Ljh"]:
         cursor.execute("SELECT username FROM user_locations WHERE username = ?", (parent,))
         if not cursor.fetchone():
@@ -221,6 +217,12 @@ def init_db():
         INSERT INTO chat_messages (room_id, room_type, sender_username, sender_name, sender_avatar, text, is_read, created_at)
         VALUES ('family_all', 'FAMILY_ALL', '미니미니', '아빠', '🐶', '우리가족챙기기 실시간 패밀리 톡방이 열렸어요! 모두 환영해요 🌿', 1, ?)
         """, (now_kst,))
+
+    # 기존 더미 자녀 위치 데이터 클린업 (실제 GPS 보고 전에는 미수신 상태로 표출)
+    cursor.execute("""
+    DELETE FROM user_locations 
+    WHERE username IN ('도비사랑녀', '미니미니채') AND (is_manual IS NULL OR is_manual = 0)
+    """)
 
     conn.commit()
     conn.close()
@@ -251,5 +253,11 @@ def set_cached_data(cache_key: str, data: dict, ttl_seconds: int = 300):
     VALUES (?, ?, ?)
     ON CONFLICT(cache_key) DO UPDATE SET data_json = excluded.data_json, expires_at = excluded.expires_at
     """, (cache_key, data_json, expires_at))
+    # 기존 더미 자녀 위치 데이터 클린업 (실제 GPS 보고 전에는 미수신 상태로 표출)
+    cursor.execute("""
+    DELETE FROM user_locations 
+    WHERE username IN ('도비사랑녀', '미니미니채') AND (is_manual IS NULL OR is_manual = 0)
+    """)
+
     conn.commit()
     conn.close()

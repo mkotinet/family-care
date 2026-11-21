@@ -9,7 +9,7 @@
   <meta name="theme-color" content="#f8fafc">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="app-version" content="1.1.2">
+  <meta name="app-version" content="1.2.0">
 
   <!-- Leaflet 오픈스트리트맵 엔진 (카카오맵 인증/로딩 실패 시 즉시 자동 폴백) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -292,9 +292,50 @@
 
       <div style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
         <button onclick="requestChildLocationRefresh()" class="btn-primary" style="padding: 10px 16px; font-size: 13px;">
-          🔄 아이 위치 즉시 갱신
+          🔄 전체 새로고침
         </button>
         <button onclick="closeSafetyModal()" class="btn-secondary" style="padding: 10px 16px; font-size: 13px;">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7-1. [모달] 부모 전용 우리 아이 현재 위치 직접 지정/수정 모달 -->
+  <div class="modal-overlay" id="modalManualLocation" onclick="closeManualLocationModal(event)">
+    <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 440px;">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span>📍</span> <span id="manualModalTargetName">첫째딸 (도비사랑녀)</span> 위치 설정
+        </div>
+        <button class="sheet-close-btn" onclick="closeManualLocationModal()">✕</button>
+      </div>
+      <p style="font-size: 12px; color: #64748b; margin-bottom: 12px;">
+        자녀 스마트폰이 꺼져있거나 앱 미설치 상태일 때, 부모가 현재 위치를 직접 지정할 수 있습니다.
+      </p>
+
+      <!-- 대표 장소 퀵 선택 칩 -->
+      <div style="font-size: 11px; font-weight: 800; color: #475569; margin-bottom: 6px;">⚡ 주요 장소 원클릭 선택</div>
+      <div class="preset-chips-container" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px;">
+        <button type="button" class="preset-chip" onclick="applyPresetLocation('평내호평역 & 학원가', 37.653412, 127.244123)">📚 평내호평역 학원가</button>
+        <button type="button" class="preset-chip" onclick="applyPresetLocation('평내초등학교', 37.646123, 127.234512)">🏫 평내초등학교</button>
+        <button type="button" class="preset-chip" onclick="applyPresetLocation('평내도서관', 37.641203, 127.228945)">📖 평내도서관</button>
+        <button type="button" class="preset-chip" onclick="applyPresetLocation('평내 중심상가', 37.647891, 127.235612)">☕ 평내 중심상가</button>
+        <button type="button" class="preset-chip" onclick="applyPresetLocation('집 (평내유진마젤란)', 37.6434558, 127.2311716)">🏡 집 (평내유진마젤란)</button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <input type="text" id="manualLocationPlaceName" placeholder="장소명 (예: 호평동 수학학원, 친구집)" style="padding: 10px; border-radius: 10px; border: 1px solid #cbd5e1; font-size: 13px;">
+        <input type="text" id="manualLocationMemo" placeholder="상태/메모 (예: 수업 중 19시 종료, 친구들과 스터디)" style="padding: 10px; border-radius: 10px; border: 1px solid #cbd5e1; font-size: 13px;">
+        
+        <div style="display: none;">
+          <input type="hidden" id="manualLocationTargetUser" value="도비사랑녀">
+          <input type="hidden" id="manualLocationLat" value="37.653412">
+          <input type="hidden" id="manualLocationLon" value="127.244123">
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
+          <button onclick="closeManualLocationModal()" class="btn-secondary" style="padding: 10px 16px;">취소</button>
+          <button onclick="submitManualLocation()" class="btn-primary" style="padding: 10px 18px;">위치 저장하기</button>
+        </div>
       </div>
     </div>
   </div>

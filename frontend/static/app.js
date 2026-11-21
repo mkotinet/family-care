@@ -1104,9 +1104,20 @@ async function checkChildSafetySummary() {
     const subEl = document.getElementById("safetyBannerSub");
 
     if (children.length > 0) {
-      const summaryTexts = children.map(c => `${c.role_title}(${c.name}): ${c.landmark || '위치 확인됨'}`);
-      if (titleEl) titleEl.textContent = `우리 아이 안심 위치 (${children.length}명)`;
-      if (subEl) subEl.textContent = summaryTexts.join(" | ");
+      const unreported = children.filter(c => !c.has_location);
+      if (unreported.length === children.length) {
+        if (titleEl) titleEl.textContent = "우리 아이 실시간 안심 위치";
+        if (subEl) subEl.textContent = "⚠️ 자녀 스마트폰 위치 수신 대기 중 (앱 설치 및 실행 필요)";
+      } else if (unreported.length > 0) {
+        const reportedChild = children.find(c => c.has_location);
+        const unChild = unreported[0];
+        if (titleEl) titleEl.textContent = `우리 아이 안심 위치 (1명 확인 / 1명 대기)`;
+        if (subEl) subEl.textContent = `${reportedChild.name}: ${reportedChild.landmark} | ⚠️ ${unChild.name}: 미수신`;
+      } else {
+        const summaryTexts = children.map(c => `${c.role_title}(${c.name}): ${c.landmark || '위치 확인됨'}`);
+        if (titleEl) titleEl.textContent = `우리 아이 안심 위치 (${children.length}명 전원 확인)`;
+        if (subEl) subEl.textContent = summaryTexts.join(" | ");
+      }
     }
   } catch (e) {}
 }
@@ -1122,18 +1133,57 @@ async function openSafetyModal() {
 
     // 아이들 위치 카드 렌더링
     const listEl = document.getElementById("safetyChildrenList");
-    listEl.innerHTML = children.map(c => `
-      <div class="item-card" style="margin-top: 8px; border: 1.5px solid #bbf7d0; background: #f0fdf4;">
-        <div class="item-card-top">
-          <span class="item-name" style="color: #166534;">${c.avatar} ${c.role_title} (${c.name})</span>
-          <span class="item-badge" style="background: #10b981; color: white;">${c.status_badge}</span>
-        </div>
-        <div style="font-size: 13px; font-weight: 800; color: #1e293b; margin: 4px 0;">📍 ${c.landmark || c.address}</div>
-        <div style="font-size: 11px; color: #64748b;">
-          갱신: ${c.updated_at} | 🔋 배터리: ${c.battery_level}% | ${c.is_moving ? '🏃 이동 중' : '🛑 정지'}
-        </div>
-      </div>
-    `).join("");
+    listEl.innerHTML = children.map(c => {
+      if (!c.has_location) {
+        return `
+          <div class="item-card child-card-unreported" style="margin-top: 8px;">
+            <div class="item-card-top">
+              <span class="item-name" style="color: #64748b;">${c.avatar} ${c.role_title} (${c.name})</span>
+              <span class="item-badge" style="background: #94a3b8; color: white;">⚪ 앱 미설치 / 수신 대기</span>
+            </div>
+            <div style="font-size: 13px; font-weight: 800; color: #475569; margin: 4px 0;">📍 위치 미수신</div>
+            <div style="font-size: 11px; color: #94a3b8; line-height: 1.4;">
+              자녀 스마트폰에서 접속 시 실제 GPS가 자동 반영됩니다.
+            </div>
+            <div class="child-card-actions">
+              <button class="btn-card-action" onclick="openManualLocationModal('${c.username}', '${c.name}', '${c.role_title}')">
+                📍 현재 위치 직접 설정
+              </button>
+              <button class="btn-card-action" onclick="sendChildLocationPing('${c.username}', '${c.name}')">
+                📲 위치 요청 톡
+              </button>
+            </div>
+          </div>
+        `;
+      } else {
+        const isManual = c.is_manual;
+        const cardClass = isManual ? "child-card-manual" : "child-card-reported";
+        const badgeColor = c.status_badge.includes("안심") ? "#10b981" : "#f59e0b";
+        return `
+          <div class="item-card ${cardClass}" style="margin-top: 8px;">
+            <div class="item-card-top">
+              <span class="item-name" style="color: #1e293b;">${c.avatar} ${c.role_title} (${c.name})</span>
+              <div style="display: flex; gap: 4px; align-items: center;">
+                ${isManual ? '<span style="font-size: 9px; padding: 2px 5px; background: #fef08a; color: #854d0e; border-radius: 4px; font-weight: 800;">부모 수동지정</span>' : '<span style="font-size: 9px; padding: 2px 5px; background: #bbf7d0; color: #166534; border-radius: 4px; font-weight: 800;">실시간 GPS</span>'}
+                <span class="item-badge" style="background: ${badgeColor}; color: white;">${c.status_badge}</span>
+              </div>
+            </div>
+            <div style="font-size: 13px; font-weight: 800; color: #1e293b; margin: 4px 0;">📍 ${c.landmark || c.address}</div>
+            <div style="font-size: 11px; color: #64748b;">
+              확인: ${c.time_diff_desc} (${c.updated_at}) | 🔋 ${c.battery_level ? c.battery_level + '%' : '--'} | ${c.is_moving ? '🏃 이동 중' : '🛑 정지'}
+            </div>
+            <div class="child-card-actions">
+              <button class="btn-card-action" onclick="openManualLocationModal('${c.username}', '${c.name}', '${c.role_title}')">
+                📍 위치 수정
+              </button>
+              <button class="btn-card-action" onclick="sendChildLocationPing('${c.username}', '${c.name}')">
+                📲 위치 요청 톡
+              </button>
+            </div>
+          </div>
+        `;
+      }
+    }).join("");
 
     // 지도 렌더링
     setTimeout(() => {
@@ -1172,7 +1222,11 @@ function initLeafletSafetyMap(container, children) {
   }
   container.innerHTML = "";
 
-  const map = L.map(container).setView([AppState.location.lat, AppState.location.lon], 15);
+  const validChildren = (children || []).filter(c => c.has_location && c.latitude && c.longitude);
+  const centerLat = validChildren.length > 0 ? validChildren[0].latitude : AppState.location.lat;
+  const centerLon = validChildren.length > 0 ? validChildren[0].longitude : AppState.location.lon;
+
+  const map = L.map(container).setView([centerLat, centerLon], validChildren.length > 0 ? 14 : 15);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '© OpenStreetMap'
@@ -1199,13 +1253,13 @@ function initLeafletSafetyMap(container, children) {
     fillOpacity: 0.15
   }).addTo(map).bindPopup('🛡️ 유진마젤란 안심 구역 (반경 250m)');
 
-  // 아이들 마커
-  children.forEach(c => {
+  // 유효한 위치가 있는 아이들만 마커 표시!
+  validChildren.forEach(c => {
     const isFirstChild = (c.username === "도비사랑녀");
-    const bgColor = isFirstChild ? "#f59e0b" : "#10b981";
+    const bgColor = isFirstChild ? "#f59e0b" : "#ec4899";
     const childIcon = L.divIcon({
       className: 'child-safety-pin',
-      html: `<div style="background:${bgColor};color:white;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,0.3);border:2px solid #ffffff;">${c.avatar} ${c.name} (🔋${c.battery_level}%)</div>`,
+      html: `<div style="background:${bgColor};color:white;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,0.3);border:2px solid #ffffff;">${c.avatar} ${c.name} (${c.landmark || '위치'})</div>`,
       iconSize: [120, 28],
       iconAnchor: [60, 14]
     });
@@ -1217,8 +1271,8 @@ function initLeafletSafetyMap(container, children) {
           <b>${c.avatar} ${c.role_title} (${c.name})</b><br>
           <span style="display:inline-block;padding:2px 6px;background:#10b981;color:white;border-radius:6px;font-size:10px;font-weight:800;margin:3px 0;">${c.status_badge}</span><br>
           📍 <b>위치:</b> ${c.landmark || c.address}<br>
-          🔋 <b>배터리:</b> ${c.battery_level}% | ${c.is_moving ? '🏃 이동 중' : '🛑 정지'}<br>
-          ⏱️ <b>갱신:</b> ${c.updated_at}
+          🔋 <b>배터리:</b> ${c.battery_level ? c.battery_level + '%' : '--'} | ${c.is_moving ? '🏃 이동 중' : '🛑 정지'}<br>
+          ⏱️ <b>확인:</b> ${c.time_diff_desc} (${c.updated_at})
         </div>
       `);
   });
@@ -1229,9 +1283,13 @@ function initLeafletSafetyMap(container, children) {
 }
 
 function initKakaoSafetyMap(container, children) {
+  const validChildren = (children || []).filter(c => c.has_location && c.latitude && c.longitude);
+  const centerLat = validChildren.length > 0 ? validChildren[0].latitude : AppState.location.lat;
+  const centerLon = validChildren.length > 0 ? validChildren[0].longitude : AppState.location.lon;
+
   const options = {
-    center: new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon),
-    level: 4
+    center: new kakao.maps.LatLng(centerLat, centerLon),
+    level: validChildren.length > 0 ? 5 : 4
   };
 
   AppState.kakaoSafetyMap = new kakao.maps.Map(container, options);
@@ -1243,26 +1301,119 @@ function initKakaoSafetyMap(container, children) {
   });
   new kakao.maps.CustomOverlay({
     position: homeMarker.getPosition(),
-    content: '<div style="padding: 4px 8px; background: #0f172a; color: white; font-size: 11px; font-weight: 800; border-radius: 8px;">🏡 집</div>',
+    content: '<div style="padding: 4px 8px; background: #0f172a; color: white; font-size: 11px; font-weight: 800; border-radius: 8px;">🏡 우리 집</div>',
     yAnchor: 2.2,
     map: AppState.kakaoSafetyMap
   });
 
-  // 아이들 마커
-  children.forEach(c => {
+  // 집 안심 구역 원 (반경 250m)
+  new kakao.maps.Circle({
+    center: new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon),
+    radius: 250,
+    strokeWeight: 2,
+    strokeColor: '#10b981',
+    strokeOpacity: 0.8,
+    fillColor: '#10b981',
+    fillOpacity: 0.15,
+    map: AppState.kakaoSafetyMap
+  });
+
+  // 유효한 위치가 있는 아이들만 마커 표시!
+  validChildren.forEach(c => {
+    const isFirstChild = (c.username === "도비사랑녀");
+    const bgColor = isFirstChild ? "#f59e0b" : "#ec4899";
     const cMarker = new kakao.maps.Marker({
       position: new kakao.maps.LatLng(c.latitude, c.longitude),
       map: AppState.kakaoSafetyMap
     });
     new kakao.maps.CustomOverlay({
       position: cMarker.getPosition(),
-      content: `<div style="padding: 4px 8px; background: #ec4899; color: white; font-size: 11px; font-weight: 800; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">${c.avatar} ${c.name}</div>`,
+      content: `<div style="padding: 5px 9px; background: ${bgColor}; color: white; font-size: 11px; font-weight: 800; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.3); border: 2px solid white; white-space: nowrap;">${c.avatar} ${c.name} (${c.landmark || '위치'})</div>`,
       yAnchor: 2.2,
       map: AppState.kakaoSafetyMap
     });
   });
 
   AppState.kakaoSafetyMap.relayout();
+}
+
+// 수동 위치 설정 모달 제어
+function openManualLocationModal(username, name, roleTitle) {
+  const modal = document.getElementById("modalManualLocation");
+  if (!modal) return;
+  document.getElementById("manualModalTargetName").textContent = `${roleTitle} (${name})`;
+  document.getElementById("manualLocationTargetUser").value = username;
+  document.getElementById("manualLocationPlaceName").value = "";
+  document.getElementById("manualLocationMemo").value = "";
+  modal.className = "modal-overlay active";
+}
+
+function closeManualLocationModal() {
+  const modal = document.getElementById("modalManualLocation");
+  if (modal) modal.className = "modal-overlay";
+}
+
+function applyPresetLocation(name, lat, lon) {
+  document.getElementById("manualLocationPlaceName").value = name;
+  document.getElementById("manualLocationLat").value = lat;
+  document.getElementById("manualLocationLon").value = lon;
+}
+
+async function submitManualLocation() {
+  const username = document.getElementById("manualLocationTargetUser").value;
+  const placeName = document.getElementById("manualLocationPlaceName").value.trim();
+  const memo = document.getElementById("manualLocationMemo").value.trim();
+  const lat = parseFloat(document.getElementById("manualLocationLat").value) || AppState.location.lat;
+  const lon = parseFloat(document.getElementById("manualLocationLon").value) || AppState.location.lon;
+
+  if (!placeName) {
+    alert("장소명을 입력해 주세요 (예: 호평동 수학학원)");
+    return;
+  }
+
+  const landmark = memo ? `${placeName} (${memo})` : placeName;
+
+  try {
+    const res = await fetch("/api/location/manual-set", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username,
+        latitude: lat,
+        longitude: lon,
+        landmark,
+        battery_level: 88
+      })
+    });
+    const d = await res.json();
+    closeManualLocationModal();
+    showToastNotice(`📍 ${username}의 위치가 '${landmark}'(으)로 갱신되었습니다!`);
+    openSafetyModal();
+    checkChildSafetySummary();
+  } catch (e) {
+    alert("위치 저장 중 오류가 발생했습니다.");
+  }
+}
+
+async function sendChildLocationPing(username, name) {
+  try {
+    await fetch("/api/location/request-ping", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        child_username: username,
+        requester_name: AppState.currentUser ? AppState.currentUser.name : "아빠"
+      })
+    });
+    showToastNotice(`📲 ${name}에게 실시간 위치 요청 톡을 전송했습니다!`);
+  } catch (e) {
+    alert("위치 요청 전송에 실패했습니다.");
+  }
+}
+
+function requestChildLocationRefresh() {
+  showToastNotice("🔄 아이들 최신 위치 정보를 다시 조회합니다...");
+  openSafetyModal();
 }
 
 // 자녀 스마트폰에서 백그라운드 GPS 위치 자동 전송

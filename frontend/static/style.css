@@ -1195,3 +1195,61 @@ body {
   border-radius: 12px !important;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
 }
+
+/* 안심 위치 미수신 및 관리자 버튼 */
+.child-card-unreported {
+  border: 1.5px dashed #cbd5e1 !important;
+  background: #f8fafc !important;
+}
+
+.child-card-reported {
+  border: 1.5px solid #bbf7d0 !important;
+  background: #f0fdf4 !important;
+}
+
+.child-card-manual {
+  border: 1.5px solid #fed7aa !important;
+  background: #fffbeb !important;
+}
+
+.child-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.btn-card-action {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: white;
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-card-action:hover {
+  background: #f1f5f9;
+}
+
+.preset-chip {
+  padding: 6px 10px;
+  border-radius: 9999px;
+  border: 1px solid #e2e8f0;
+  background: #f1f5f9;
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.preset-chip:hover, .preset-chip.active {
+  background: #0ea5e9;
+  color: white;
+  border-color: #0ea5e9;
+}

@@ -1,12 +1,62 @@
 import urllib.request
 import urllib.parse
 import json
-from backend.config import DATA_GO_KR_API_KEY
+from datetime import datetime
+import zoneinfo
+from backend.config import DATA_GO_KR_API_KEY, KAKAO_REST_API_KEY, TIMEZONE
 from backend.database import get_db_connection, get_cached_data, set_cached_data
 from backend.mock_data import get_simulated_transit
 
+KST = zoneinfo.ZoneInfo(TIMEZONE)
+
+async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1000):
+    cache_key = f"bus_stops_{round(lat, 3)}_{round(lon, 3)}"
+    cached = get_cached_data(cache_key)
+    if cached:
+        return cached
+
+    stops = []
+    if KAKAO_REST_API_KEY:
+        try:
+            url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+            params = {
+                "query": "버스정류장",
+                "x": str(lon),
+                "y": str(lat),
+                "radius": radius,
+                "size": 15,
+                "sort": "distance"
+            }
+            req = urllib.request.Request(f"{url}?{urllib.parse.urlencode(params)}", headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                data = json.loads(resp.read().decode())
+                for d in data.get("documents", []):
+                    stops.append({
+                        "id": d.get("id"),
+                        "name": d.get("place_name").replace(" 버스정류장", "").strip(),
+                        "full_name": d.get("place_name"),
+                        "address": d.get("road_address_name") or d.get("address_name"),
+                        "latitude": float(d.get("y")),
+                        "longitude": float(d.get("x")),
+                        "distance": int(d.get("distance", 0))
+                    })
+        except Exception:
+            pass
+
+    if not stops:
+        # 평내동 기본 정류소 폴백
+        stops = [
+            {"id": "s1", "name": "평내유진아파트", "full_name": "평내유진아파트 버스정류장", "address": "남양주시 평내로 145", "latitude": 37.6434558, "longitude": 127.2311716, "distance": 50},
+            {"id": "s2", "name": "평내화성·유진아파트", "full_name": "평내화성·유진아파트 정류소", "address": "남양주시 평내로 140", "latitude": 37.643900, "longitude": 127.231500, "distance": 120},
+            {"id": "s3", "name": "평내호평역", "full_name": "평내호평역 정류소", "address": "남양주시 늘을2로 20", "latitude": 37.653412, "longitude": 127.244123, "distance": 850},
+            {"id": "s4", "name": "평내동주민센터·남양주소방서", "full_name": "평내동주민센터 버스정류장", "address": "남양주시 평내로 110", "latitude": 37.641500, "longitude": 127.229000, "distance": 320}
+        ]
+
+    set_cached_data(cache_key, stops, ttl_seconds=3600)
+    return stops
+
 async def get_transit_routes():
-    cache_key = "transit_routes_real_v2"
+    cache_key = "transit_routes_real_v3"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
@@ -14,10 +64,8 @@ async def get_transit_routes():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    SELECT r.*, m.name as member_name, m.role as member_role
-    FROM favorite_routes r
-    LEFT JOIN family_members m ON r.member_id = m.id
-    ORDER BY r.sort_order ASC, r.id ASC
+    SELECT * FROM favorite_routes
+    ORDER BY sort_order ASC, id ASC
     """)
     rows = cursor.fetchall()
     conn.close()
@@ -55,7 +103,6 @@ async def get_transit_routes():
                     if isinstance(items, dict):
                         items = [items]
 
-                    # 등록된 노선 번호와 매칭
                     matched = None
                     for it in items:
                         if str(it.get("routeno")) == route_no or route_no in str(it.get("routeno")):
@@ -71,17 +118,19 @@ async def get_transit_routes():
                         remain_stops = f"{cnt}정거장 전 ({v_type})"
                         badge_color = "#10b981" if mins <= 5 else "#3b82f6"
             except Exception:
-                pass  # 실패 시 시뮬레이션 데이터 유지
+                pass
 
+        dest_text = row["dest_station_name"] or row["target_destination"]
         results.append({
             "id": row["id"],
-            "member_name": row["member_name"] or "가족공용",
+            "user_username": row["user_username"] or "가족공용",
             "title": row["title"],
             "transit_type": r_type,
             "station_id": node_id,
             "station_name": row["station_name"],
+            "dest_station_name": dest_text,
             "route_no": row["route_no"],
-            "destination": row["target_destination"],
+            "destination": dest_text,
             "remain_time": remain_time,
             "remain_stops": remain_stops,
             "crowded_level": crowded_level,
@@ -94,17 +143,14 @@ async def get_transit_routes():
     set_cached_data(cache_key, results, ttl_seconds=30)
     return results
 
-async def add_favorite_route(title: str, transit_type: str, station_name: str, route_no: str, target_destination: str, member_id: int = 1):
-    from datetime import datetime
-    import zoneinfo
-    from backend.config import TIMEZONE
+async def add_favorite_route(title: str, transit_type: str, station_name: str, route_no: str, target_destination: str, dest_station_name: str = "", user_username: str = "미니미니"):
     conn = get_db_connection()
     cursor = conn.cursor()
-    now_kst = datetime.now(zoneinfo.ZoneInfo(TIMEZONE)).isoformat()
+    now_kst = datetime.now(KST).isoformat()
     cursor.execute("""
-    INSERT INTO favorite_routes (member_id, title, transit_type, station_name, route_no, target_destination, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (member_id, title, transit_type, station_name, route_no, target_destination, now_kst))
+    INSERT INTO favorite_routes (user_username, title, transit_type, station_name, route_no, target_destination, dest_station_name, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (user_username, title, transit_type, station_name, route_no, target_destination, dest_station_name or target_destination, now_kst))
     conn.commit()
     conn.close()
     return True

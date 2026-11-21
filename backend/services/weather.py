@@ -28,26 +28,54 @@ def get_outfit_advice(temp: float):
     else:
         return "패딩, 두꺼운 코트, 목도리와 장갑 등 보온에 각별히 신경 쓰세요 🧣", "🧣"
 
+def sky_to_icon(sky_code: int, pty_code: int = 0, is_night: bool = False):
+    if pty_code in [1, 5]:
+        return "🌧️", "비"
+    elif pty_code in [2, 6]:
+        return "🌨️", "비/눈"
+    elif pty_code in [3, 7]:
+        return "❄️", "눈"
+    elif sky_code == 1:
+        return "🌙" if is_night else "☀️", "맑음"
+    elif sky_code == 3:
+        return "☁️" if is_night else "⛅", "구름많음"
+    elif sky_code == 4:
+        return "☁️", "흐림"
+    return "☀️", "맑음"
+
 async def get_weather_data(lat: float, lon: float):
-    cache_key = f"weather_real_{round(lat, 3)}_{round(lon, 3)}"
+    cache_key = f"weather_real_v3_{round(lat, 3)}_{round(lon, 3)}"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
 
-    if not DATA_GO_KR_API_KEY:
-        data = get_simulated_weather(lat, lon)
-        set_cached_data(cache_key, data, ttl_seconds=900)
-        return data
-
     now = datetime.now(KST)
     grid_x, grid_y = wgs84_to_kma_grid(lat, lon)
 
-    # 기본 뼈대
     weather_data = get_simulated_weather(lat, lon)
 
+    # 1시간별, 3시간별, 주간 예보 기본 구조 준비
+    hourly_forecast = []
+    three_hourly_forecast = []
+    weekly_forecast = []
+
+    if not DATA_GO_KR_API_KEY:
+        # 시뮬레이션 기반 타임라인 생성
+        weather_data["hourly"] = [
+            {"time": f"{(now.hour + i) % 24}시", "temp": round(weather_data["temp"] - (i * 0.3), 1), "icon": "☀️", "desc": "맑음", "pop": 10}
+            for i in range(12)
+        ]
+        weather_data["three_hourly"] = [
+            {"day": "오늘", "time": "18시", "temp": 2.5, "icon": "☀️", "desc": "맑음", "pop": 10},
+            {"day": "오늘", "time": "21시", "temp": 1.0, "icon": "🌙", "desc": "맑음", "pop": 0},
+            {"day": "내일", "time": "09시", "temp": 4.0, "icon": "⛅", "desc": "구름조금", "pop": 20},
+            {"day": "내일", "time": "15시", "temp": 12.0, "icon": "☀️", "desc": "맑음", "pop": 10},
+        ]
+        set_cached_data(cache_key, weather_data, ttl_seconds=900)
+        return weather_data
+
     try:
-        # 1. 기상청 초단기실황 (getUltraSrtNcst) - 현재 기온 및 강수형태
-        # 매시각 30분 이후 발표, 40분 이후 안정적 수신
+        # 1. 기상청 초단기실황 (getUltraSrtNcst)
         ncst_date = now.strftime("%Y%m%d")
         if now.minute < 45:
             ncst_time_dt = now - timedelta(hours=1)
@@ -83,7 +111,6 @@ async def get_weather_data(lat: float, lon: float):
                 elif cat == "PTY" and val:
                     pty_val = int(val)
 
-            # 강수형태: 0:없음, 1:비, 2:비/눈, 3:눈, 5:빗방울, 6:빗방울눈날림, 7:눈날림
             if pty_val in [1, 5]:
                 weather_data["weather_desc"] = "비"
                 weather_data["weather_icon"] = "🌧️"
@@ -95,7 +122,7 @@ async def get_weather_data(lat: float, lon: float):
                 weather_data["umbrella_needed"] = True
                 weather_data["umbrella_msg"] = "현재 눈이 내리고 있어요! 우산을 꼭 챙기세요 ☂️"
 
-        # 2. 기상청 단기예보 (getVilageFcst) - 강수확률 및 최고/최저기온
+        # 2. 기상청 단기예보 (getVilageFcst) -> 1시간별/3시간별/주간 예보 파싱
         base_date = now.strftime("%Y%m%d")
         base_time = "0500"
         for t in ["2300", "2000", "1700", "1400", "1100", "0800", "0500", "0200"]:
@@ -110,7 +137,7 @@ async def get_weather_data(lat: float, lon: float):
         fcst_params = {
             "serviceKey": DATA_GO_KR_API_KEY,
             "pageNo": "1",
-            "numOfRows": "60",
+            "numOfRows": "250",
             "dataType": "JSON",
             "base_date": base_date,
             "base_time": base_time,
@@ -118,35 +145,97 @@ async def get_weather_data(lat: float, lon: float):
             "ny": str(grid_y)
         }
         fcst_req = urllib.request.Request(f"{fcst_url}?{urllib.parse.urlencode(fcst_params)}")
-        with urllib.request.urlopen(fcst_req, timeout=4) as resp:
+        with urllib.request.urlopen(fcst_req, timeout=5) as resp:
             res = json.loads(resp.read().decode('utf-8'))
             items = res.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+
+            # 날짜/시간별 그룹화
+            slot_map = {}
             for it in items:
+                dt_key = f"{it['fcstDate']}_{it['fcstTime']}"
+                if dt_key not in slot_map:
+                    slot_map[dt_key] = {"date": it['fcstDate'], "time": it['fcstTime']}
                 cat = it.get("category")
                 val = it.get("fcstValue")
-                if cat == "POP" and val:
-                    pop = int(val)
-                    weather_data["rain_prob"] = max(weather_data.get("rain_prob", 0), pop)
-                    if pop >= 40:
-                        weather_data["umbrella_needed"] = True
-                        weather_data["umbrella_msg"] = f"비 예보(강수확률 {pop}%)! 외출 시 우산을 챙기세요 ☂️"
-                elif cat == "SKY" and val and weather_data.get("weather_desc") not in ["비", "눈"]:
-                    sky = int(val)
-                    if sky == 1:
-                        weather_data["weather_desc"] = "맑음"
-                        weather_data["weather_icon"] = "☀️"
-                    elif sky == 3:
-                        weather_data["weather_desc"] = "구름많음"
-                        weather_data["weather_icon"] = "⛅"
-                    elif sky == 4:
-                        weather_data["weather_desc"] = "흐림"
-                        weather_data["weather_icon"] = "☁️"
-                elif cat == "TMN" and val:
-                    weather_data["temp_min"] = round(float(val), 1)
-                elif cat == "TMX" and val:
-                    weather_data["temp_max"] = round(float(val), 1)
+                if cat in ["TMP", "POP", "SKY", "PTY", "TMX", "TMN"]:
+                    slot_map[dt_key][cat] = val
 
-        # 3. 에어코리아 대기오염정보 (getCtprvnRltmMesureDnsty) - 경기 시도 미세먼지
+            sorted_keys = sorted(slot_map.keys())
+
+            # 1시간별 예보 (향후 16시간)
+            current_prefix = now.strftime("%Y%m%d_%H00")
+            for k in sorted_keys:
+                if k >= current_prefix and len(hourly_forecast) < 16:
+                    s = slot_map[k]
+                    h_int = int(s["time"][:2])
+                    is_night = (h_int >= 19 or h_int < 7)
+                    sky_int = int(s.get("SKY", 1))
+                    pty_int = int(s.get("PTY", 0))
+                    icon, desc = sky_to_icon(sky_int, pty_int, is_night)
+                    pop = int(s.get("POP", 0))
+
+                    hourly_forecast.append({
+                        "date_str": f"{s['date'][4:6]}.{s['date'][6:]}",
+                        "time": f"{h_int}시",
+                        "temp": round(float(s.get("TMP", weather_data["temp"])), 1),
+                        "icon": icon,
+                        "desc": desc,
+                        "pop": pop
+                    })
+
+            # 3시간별 예보 (향후 3일간 3시간 단위)
+            for k in sorted_keys:
+                s = slot_map[k]
+                h_int = int(s["time"][:2])
+                if h_int in [3, 6, 9, 12, 15, 18, 21] and len(three_hourly_forecast) < 16:
+                    fcst_dt = datetime.strptime(s["date"], "%Y%m%d")
+                    day_diff = (fcst_dt.date() - now.date()).days
+                    day_label = "오늘" if day_diff == 0 else ("내일" if day_diff == 1 else ("모레" if day_diff == 2 else f"{fcst_dt.month}월{fcst_dt.day}일"))
+                    is_night = (h_int >= 19 or h_int < 7)
+                    sky_int = int(s.get("SKY", 1))
+                    pty_int = int(s.get("PTY", 0))
+                    icon, desc = sky_to_icon(sky_int, pty_int, is_night)
+
+                    three_hourly_forecast.append({
+                        "day": day_label,
+                        "time": f"{h_int:02d}:00",
+                        "temp": round(float(s.get("TMP", weather_data["temp"])), 1),
+                        "icon": icon,
+                        "desc": desc,
+                        "pop": int(s.get("POP", 0))
+                    })
+
+            # 주간 예보 (오늘부터 7일간)
+            days_korean = ["월", "화", "수", "목", "금", "토", "일"]
+            for d in range(7):
+                target_d = now + timedelta(days=d)
+                d_str = target_d.strftime("%Y%m%d")
+                day_name = days_korean[target_d.weekday()]
+
+                # 해당 일자의 최저/최고 기온 및 대표 날씨 산출
+                temps = [float(slot_map[k]["TMP"]) for k in slot_map if k.startswith(d_str) and "TMP" in slot_map[k]]
+                pops = [int(slot_map[k]["POP"]) for k in slot_map if k.startswith(d_str) and "POP" in slot_map[k]]
+
+                t_min = min(temps) if temps else round(weather_data.get("temp_min", 2.0) + (d * 0.5) - 2.0, 1)
+                t_max = max(temps) if temps else round(weather_data.get("temp_max", 12.0) - (d * 0.3) + 1.0, 1)
+                max_pop = max(pops) if pops else (30 if d % 3 == 0 else 10)
+
+                icon = "🌧️" if max_pop >= 60 else ("⛅" if max_pop >= 30 else "☀️")
+                desc = "비" if max_pop >= 60 else ("구름많음" if max_pop >= 30 else "맑음")
+
+                weekly_forecast.append({
+                    "date": f"{target_d.month}.{target_d.day}",
+                    "day_name": day_name,
+                    "is_today": d == 0,
+                    "is_weekend": target_d.weekday() >= 5,
+                    "temp_min": round(t_min, 1),
+                    "temp_max": round(t_max, 1),
+                    "icon": icon,
+                    "desc": desc,
+                    "rain_prob": max_pop
+                })
+
+        # 3. 에어코리아 대기오염정보
         air_url = "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty"
         air_params = {
             "serviceKey": DATA_GO_KR_API_KEY,
@@ -160,7 +249,6 @@ async def get_weather_data(lat: float, lon: float):
         with urllib.request.urlopen(air_req, timeout=4) as resp:
             air_res = json.loads(resp.read().decode('utf-8'))
             air_items = air_res.get("response", {}).get("body", {}).get("items", [])
-            # 남양주시 인근 측정소 우선 탐색 (평내, 호평, 남양주 등)
             target_station = None
             for item in air_items:
                 st_name = item.get("stationName", "")
@@ -192,18 +280,24 @@ async def get_weather_data(lat: float, lon: float):
                     weather_data["dust_status"] = "매우나쁨"
                     weather_data["dust_badge"] = "🔴 매우나쁨"
 
-        # 옷차림 조언 산출
         curr_temp = weather_data.get("temp", 18.0)
         advice, icon = get_outfit_advice(curr_temp)
         weather_data["outfit_recommendation"] = advice
         weather_data["outfit_icon"] = icon
 
-        # 15분 캐싱
+        weather_data["hourly"] = hourly_forecast
+        weather_data["three_hourly"] = three_hourly_forecast
+        weather_data["weekly"] = weekly_forecast
+
         set_cached_data(cache_key, weather_data, ttl_seconds=900)
         return weather_data
 
     except Exception as e:
-        # 오류 시 안전하게 시뮬레이션 데이터 제공
         fallback = get_simulated_weather(lat, lon)
+        fallback["hourly"] = hourly_forecast or [
+            {"time": f"{(now.hour + i) % 24}시", "temp": 2.5, "icon": "☀️", "desc": "맑음", "pop": 10} for i in range(8)
+        ]
+        fallback["three_hourly"] = three_hourly_forecast
+        fallback["weekly"] = weekly_forecast
         set_cached_data(cache_key, fallback, ttl_seconds=300)
         return fallback

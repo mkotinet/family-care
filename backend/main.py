@@ -2,15 +2,19 @@ import os
 from pathlib import Path
 from datetime import datetime
 import zoneinfo
-from fastapi import FastAPI, Request, Query, Body
+from fastapi import FastAPI, Request, Query, Body, Header
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import DEFAULT_LOCATION, APP_TITLE, APP_SUBTITLE, TIMEZONE, PORT
-from backend.database import init_db, get_db_connection
+from backend.database import init_db
+from backend.services.auth import authenticate_user, get_user_by_token, get_family_members_list
+from backend.services.location import update_user_location, get_family_locations
+from backend.services.chat import get_chat_rooms, get_messages, send_message
+from backend.services.places import add_favorite_place, get_favorite_places, remove_favorite_place
 from backend.services.weather import get_weather_data
-from backend.services.transit import get_transit_routes, add_favorite_route
+from backend.services.transit import get_transit_routes, add_favorite_route, search_nearby_bus_stops
 from backend.services.hospital import get_hospital_pharmacy_info
 from backend.services.restaurant import get_favorite_restaurants, add_favorite_restaurant, search_places_kakao
 from backend.services.health import get_health_alerts
@@ -20,7 +24,6 @@ KST = zoneinfo.ZoneInfo(TIMEZONE)
 
 app = FastAPI(title=APP_TITLE, description=APP_SUBTITLE)
 
-# CORS 미들웨어
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,7 +51,6 @@ async def serve_index():
 
 @app.get("/api/healthz")
 async def health_check():
-    """도커 및 포테이너 헬스체크용 엔드포인트"""
     return {
         "status": "healthy",
         "app": APP_TITLE,
@@ -57,27 +59,122 @@ async def health_check():
     }
 
 @app.get("/api/init")
-async def get_app_init():
-    """앱 첫 로딩 시 가족 정보, 기본 위치, 현재 시간(KST) 전달"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM family_members ORDER BY id ASC")
-    members = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-
+async def get_app_init(authorization: str = Header(None)):
+    """초기 앱 로드: 가족 4인 정보, 기본 거점, 서버시간 전달"""
+    members = await get_family_members_list()
     now_kst = datetime.now(KST)
+
+    current_user = None
+    if authorization:
+        token = authorization.replace("Bearer ", "").strip()
+        current_user = await get_user_by_token(token)
+
     return {
         "app_title": APP_TITLE,
         "app_subtitle": APP_SUBTITLE,
         "default_location": DEFAULT_LOCATION,
         "family_members": members,
+        "current_user": current_user,
         "server_time": now_kst.isoformat(),
         "kst_date_string": now_kst.strftime("%Y년 %m월 %d일"),
         "kst_day_name": ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"][now_kst.weekday()],
         "is_weekend": now_kst.weekday() >= 5
     }
 
-# 1. 날씨 & 미세먼지 & 옷차림
+# --- 1. 회원 인증 (하루퀴즈 포맷 4인 가족) ---
+@app.post("/api/auth/login")
+async def api_auth_login(payload: dict = Body(...)):
+    username = payload.get("username", "")
+    password = payload.get("password", "")
+    device_info = payload.get("device_info", "Mobile Web")
+    res = await authenticate_user(username, password, device_info)
+    return res
+
+@app.get("/api/auth/me")
+async def api_auth_me(authorization: str = Header(None)):
+    token = (authorization or "").replace("Bearer ", "").strip()
+    user = await get_user_by_token(token)
+    if not user:
+        return {"success": False, "message": "로그인이 필요합니다."}
+    return {"success": True, "user": user}
+
+@app.get("/api/auth/family")
+async def api_auth_family():
+    members = await get_family_members_list()
+    return members
+
+# --- 2. 실시간 GPS 안심 위치 추적 ---
+@app.post("/api/location/update")
+async def api_location_update(payload: dict = Body(...)):
+    username = payload.get("username")
+    lat = float(payload.get("latitude", DEFAULT_LOCATION["lat"]))
+    lon = float(payload.get("longitude", DEFAULT_LOCATION["lon"]))
+    accuracy = float(payload.get("accuracy", 10.0))
+    battery = int(payload.get("battery_level", 100))
+    is_moving = bool(payload.get("is_moving", False))
+
+    res = await update_user_location(username, lat, lon, accuracy, battery, is_moving)
+    return res
+
+@app.get("/api/location/family")
+async def api_location_family():
+    """부모 화면에서 우리 아이들 및 가족 실시간 위치 조회"""
+    data = await get_family_locations()
+    return data
+
+# --- 3. 실시간 가족 채팅방 ---
+@app.get("/api/chat/rooms")
+async def api_chat_rooms(authorization: str = Header(None)):
+    token = (authorization or "").replace("Bearer ", "").strip()
+    user = await get_user_by_token(token)
+    uname = user["username"] if user else "미니미니"
+    rooms = await get_chat_rooms(uname)
+    return rooms
+
+@app.get("/api/chat/messages")
+async def api_chat_messages(room_id: str = Query("family_all"), limit: int = Query(50)):
+    msgs = await get_messages(room_id, limit)
+    return msgs
+
+@app.post("/api/chat/send")
+async def api_chat_send(payload: dict = Body(...)):
+    res = await send_message(
+        room_id=payload.get("room_id", "family_all"),
+        sender_username=payload.get("sender_username", "미니미니"),
+        text=payload.get("text", ""),
+        msg_type=payload.get("msg_type", "TEXT"),
+        location_data=payload.get("location_data"),
+        photo_url=payload.get("photo_url")
+    )
+    return res
+
+# --- 4. 지도 즐겨찾기 장소 ---
+@app.post("/api/places/favorite")
+async def api_places_favorite_add(payload: dict = Body(...)):
+    res = await add_favorite_place(
+        user_username=payload.get("user_username", "미니미니"),
+        category=payload.get("category", "식당"),
+        name=payload.get("name"),
+        address=payload.get("address", ""),
+        lat=payload.get("latitude"),
+        lon=payload.get("longitude"),
+        phone=payload.get("phone", ""),
+        status_info=payload.get("status_info", ""),
+        memo=payload.get("memo", "")
+    )
+    return res
+
+@app.get("/api/places/favorites")
+async def api_places_favorites(user: str = Query(None)):
+    data = await get_favorite_places(user)
+    return data
+
+@app.delete("/api/places/favorite/{place_id}")
+async def api_places_favorite_remove(place_id: int):
+    res = await remove_favorite_place(place_id)
+    return res
+
+# --- 5. 날씨 상세 (1시간별 / 3시간별 / 주간) ---
 @app.get("/api/weather")
 async def api_weather(lat: float = Query(None), lon: float = Query(None)):
     lat = lat if lat is not None else DEFAULT_LOCATION["lat"]
@@ -85,11 +182,18 @@ async def api_weather(lat: float = Query(None), lon: float = Query(None)):
     data = await get_weather_data(lat, lon)
     return data
 
-# 2. 교통 & 실시간 루트
+# --- 6. 교통 & 버스 정류소 지도 검색 ---
 @app.get("/api/transit")
 async def api_transit():
     data = await get_transit_routes()
     return data
+
+@app.get("/api/transit/nearby-stops")
+async def api_transit_nearby_stops(lat: float = Query(None), lon: float = Query(None), radius: int = Query(1000)):
+    lat = lat if lat is not None else DEFAULT_LOCATION["lat"]
+    lon = lon if lon is not None else DEFAULT_LOCATION["lon"]
+    stops = await search_nearby_bus_stops(lat, lon, radius)
+    return stops
 
 @app.post("/api/transit/add")
 async def api_transit_add(payload: dict = Body(...)):
@@ -99,11 +203,12 @@ async def api_transit_add(payload: dict = Body(...)):
         station_name=payload.get("station_name", "정류장"),
         route_no=payload.get("route_no", "100"),
         target_destination=payload.get("target_destination", "시내방면"),
-        member_id=int(payload.get("member_id", 1))
+        dest_station_name=payload.get("dest_station_name", ""),
+        user_username=payload.get("user_username", "미니미니")
     )
     return {"success": True}
 
-# 3. 휴일/주말 문 연 병원 & 약국
+# --- 7. 병원 & 당번약국 ---
 @app.get("/api/hospital")
 async def api_hospital(lat: float = Query(None), lon: float = Query(None), filter_type: str = Query("ALL")):
     lat = lat if lat is not None else DEFAULT_LOCATION["lat"]
@@ -111,24 +216,11 @@ async def api_hospital(lat: float = Query(None), lon: float = Query(None), filte
     data = await get_hospital_pharmacy_info(lat, lon, filter_type)
     return data
 
-# 4. 단골 식당 & 주말 영업
+# --- 8. 식당 & 카카오 로컬 검색 ---
 @app.get("/api/restaurant")
 async def api_restaurant():
     data = await get_favorite_restaurants()
     return data
-
-@app.post("/api/restaurant/add")
-async def api_restaurant_add(payload: dict = Body(...)):
-    await add_favorite_restaurant(
-        name=payload.get("name"),
-        category=payload.get("category", "한식"),
-        phone=payload.get("phone", ""),
-        address=payload.get("address", ""),
-        business_hours=payload.get("business_hours", "11:00 ~ 21:00"),
-        closed_days=payload.get("closed_days", "연중무휴"),
-        family_note=payload.get("family_note", "")
-    )
-    return {"success": True}
 
 @app.get("/api/restaurant/search")
 async def api_restaurant_search(query: str = Query(...), lat: float = Query(None), lon: float = Query(None)):
@@ -137,7 +229,7 @@ async def api_restaurant_search(query: str = Query(...), lat: float = Query(None
     results = await search_places_kakao(query, lat, lon)
     return results
 
-# 5. 건강 & 감염병 예보
+# --- 9. 건강 알레르기 & 축제 ---
 @app.get("/api/health")
 async def api_health(lat: float = Query(None), lon: float = Query(None)):
     lat = lat if lat is not None else DEFAULT_LOCATION["lat"]
@@ -145,7 +237,6 @@ async def api_health(lat: float = Query(None), lon: float = Query(None)):
     data = await get_health_alerts(lat, lon)
     return data
 
-# 6. 축제 & 붐빔(혼잡도)
 @app.get("/api/culture")
 async def api_culture(lat: float = Query(None), lon: float = Query(None)):
     lat = lat if lat is not None else DEFAULT_LOCATION["lat"]

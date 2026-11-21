@@ -52,3 +52,9 @@ def calculate_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) ->
          math.sin(dlon / 2) ** 2)
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return round(R * c, 2)
+
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """
+    두 위경도 지점 사이의 거리(미터) 계산
+    """
+    return calculate_distance_km(lat1, lon1, lat2, lon2) * 1000.0

@@ -15,56 +15,168 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+# 4대 공식 가족 회원 정보 (하루퀴즈 연동, 다른 아이디 제외)
+FAMILY_ACCOUNTS = [
+    {
+        "username": "미니미니",
+        "name": "미니미니",
+        "role_title": "아빠",
+        "role_type": "PARENT",
+        "avatar": "🐶",
+        "avatar_color": "#3b82f6",
+        "grade": "가장 / 아빠",
+        "password_hash": "99381a8d56024a3660dd4d0a6eb888b9b3ab8ae59d8582d4a707a62697d9bd7f"
+    },
+    {
+        "username": "Ljh",
+        "name": "Ljh",
+        "role_title": "엄마",
+        "role_type": "PARENT",
+        "avatar": "🍀",
+        "avatar_color": "#ec4899",
+        "grade": "엄마",
+        "password_hash": ""
+    },
+    {
+        "username": "도비사랑녀",
+        "name": "도비사랑녀",
+        "role_title": "첫째딸",
+        "role_type": "CHILD",
+        "avatar": "🐥",
+        "avatar_color": "#f59e0b",
+        "grade": "첫째딸",
+        "password_hash": ""
+    },
+    {
+        "username": "미니미니채",
+        "name": "미니미니채",
+        "role_title": "둘째딸",
+        "role_type": "CHILD",
+        "avatar": "🌸",
+        "avatar_color": "#10b981",
+        "grade": "둘째딸",
+        "password_hash": ""
+    }
+]
+
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # 1. 가족 구성원 프로필
+    # 1. 가족 전용 회원 테이블
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS family_members (
+    CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
         name TEXT NOT NULL,
-        role TEXT NOT NULL,  -- '아빠', '엄마', '우리아이', '할머니' 등
-        avatar_color TEXT DEFAULT '#38bdf8',
-        is_default INTEGER DEFAULT 0,
+        role_title TEXT NOT NULL,      -- '아빠', '엄마', '첫째딸', '둘째딸'
+        role_type TEXT NOT NULL,       -- 'PARENT' or 'CHILD'
+        avatar TEXT NOT NULL,
+        avatar_color TEXT NOT NULL,
+        grade TEXT,
+        password_hash TEXT,
         created_at TEXT NOT NULL
     )
     """)
 
-    # 2. 나만의 자주 가는 교통 루트
+    # 2. 모바일 영구 세션 토큰 테이블
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS user_tokens (
+        token TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        device_info TEXT,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT NOT NULL
+    )
+    """)
+
+    # 3. 가족 실시간 GPS 안심 위치 테이블
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS user_locations (
+        username TEXT PRIMARY KEY,
+        latitude REAL NOT NULL,
+        longitude REAL NOT NULL,
+        accuracy REAL,
+        address TEXT,
+        landmark TEXT,
+        battery_level INTEGER DEFAULT 100,
+        is_moving INTEGER DEFAULT 0,
+        updated_at TEXT NOT NULL
+    )
+    """)
+
+    # 4. 가족 전용 실시간 채팅 메시지 테이블 (단체/1:1/다:1)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        room_id TEXT NOT NULL,         -- 'family_all', 'minikim_ljh', 'parents_child' 등
+        room_type TEXT NOT NULL,       -- 'FAMILY_ALL', 'DIRECT', 'GROUP'
+        sender_username TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        sender_avatar TEXT NOT NULL,
+        text TEXT NOT NULL,
+        msg_type TEXT DEFAULT 'TEXT',  -- 'TEXT', 'LOCATION', 'PHOTO'
+        location_json TEXT,            -- 위치 공유 데이터
+        photo_url TEXT,
+        is_read INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    # 5. 지도 기반 즐겨찾기 장소 (식당, 약국, 병원 등)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS favorite_places (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_username TEXT,            -- 등록자
+        category TEXT NOT NULL,        -- '식당', '약국', '병원', '축제'
+        name TEXT NOT NULL,
+        address TEXT,
+        latitude REAL,
+        longitude REAL,
+        phone TEXT,
+        status_info TEXT,
+        memo TEXT,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    # 6. 자주 가는 교통 루트
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS favorite_routes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         member_id INTEGER,
-        title TEXT NOT NULL,           -- 예: '출근길 (잠실역 방면)', '등교길'
-        transit_type TEXT NOT NULL,    -- 'BUS' or 'SUBWAY'
-        station_id TEXT,               -- 정류소 ID / 역 코드
-        station_name TEXT NOT NULL,    -- 정류소/역 명칭 (예: '평내유진아파트', '평내호평역')
-        route_no TEXT NOT NULL,        -- 노선번호 (예: 'M2323', '165', '경춘선')
-        target_destination TEXT,       -- 방면 (예: '잠실광역환승센터', '청량리')
+        user_username TEXT,
+        title TEXT NOT NULL,
+        transit_type TEXT NOT NULL,
+        station_id TEXT,
+        station_name TEXT NOT NULL,
+        dest_station_id TEXT,
+        dest_station_name TEXT,
+        route_no TEXT NOT NULL,
+        target_destination TEXT,
         sort_order INTEGER DEFAULT 0,
         created_at TEXT NOT NULL
     )
     """)
 
-    # 3. 단골 식당 즐겨찾기 (주말 영업시간/메모)
+    # 7. 단골 식당 테이블
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS favorite_restaurants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        category TEXT,                 -- 한식, 중식, 양식, 카페 등
+        category TEXT,
         phone TEXT,
         address TEXT,
         distance_meters INTEGER,
-        business_hours TEXT,           -- 예: '평일 11:30~21:00 / 토·일 12:00~21:30'
-        closed_days TEXT,              -- 예: '매주 월요일 휴무'
-        family_note TEXT,              -- 예: '아이들이 돈까스 좋아함, 주말 웨이팅 있음'
+        business_hours TEXT,
+        closed_days TEXT,
+        family_note TEXT,
         is_favorite INTEGER DEFAULT 1,
         created_at TEXT NOT NULL
     )
     """)
 
-    # 4. API 응답 스마트 캐시 (공공데이터 트래픽 절약 및 번개 로딩)
+    # 8. API 스마트 캐시
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS api_cache (
         cache_key TEXT PRIMARY KEY,
@@ -73,49 +185,41 @@ def init_db():
     )
     """)
 
-    # 기본 가족 구성원 및 초기 샘플 데이터 시딩 (비어있을 때만)
-    cursor.execute("SELECT COUNT(*) FROM family_members")
-    if cursor.fetchone()[0] == 0:
-        now_kst = datetime.now(KST).isoformat()
-        cursor.execute("INSERT INTO family_members (name, role, avatar_color, is_default, created_at) VALUES (?, ?, ?, ?, ?)",
-                       ("아빠", "직장인", "#3b82f6", 1, now_kst))
-        cursor.execute("INSERT INTO family_members (name, role, avatar_color, is_default, created_at) VALUES (?, ?, ?, ?, ?)",
-                       ("엄마", "주부/프리랜서", "#ec4899", 0, now_kst))
-        cursor.execute("INSERT INTO family_members (name, role, avatar_color, is_default, created_at) VALUES (?, ?, ?, ?, ?)",
-                       ("우리 아이", "학생", "#10b981", 0, now_kst))
+    # 4대 공식 가족 회원 시딩/업데이트
+    now_kst = datetime.now(KST).isoformat()
+    for acc in FAMILY_ACCOUNTS:
+        cursor.execute("SELECT id FROM users WHERE username = ?", (acc["username"],))
+        row = cursor.fetchone()
+        if not row:
+            cursor.execute("""
+            INSERT INTO users (username, name, role_title, role_type, avatar, avatar_color, grade, password_hash, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (acc["username"], acc["name"], acc["role_title"], acc["role_type"], acc["avatar"], acc["avatar_color"], acc["grade"], acc["password_hash"], now_kst))
 
-    # 기본 남양주 평내유진마젤란 단골 루트 시딩
-    cursor.execute("SELECT COUNT(*) FROM favorite_routes")
-    if cursor.fetchone()[0] == 0:
-        now_kst = datetime.now(KST).isoformat()
-        cursor.execute("""
-        INSERT INTO favorite_routes (member_id, title, transit_type, station_id, station_name, route_no, target_destination, sort_order, created_at)
-        VALUES (1, '출근길 (잠실 직행)', 'BUS', '222000495', '평내유진아파트', 'M2323', '잠실광역환승센터', 1, ?)
-        """, (now_kst,))
-        cursor.execute("""
-        INSERT INTO favorite_routes (member_id, title, transit_type, station_id, station_name, route_no, target_destination, sort_order, created_at)
-        VALUES (1, '평내호평역 환승버스', 'BUS', '222000495', '평내유진아파트', '165', '평내호평역·청량리', 2, ?)
-        """, (now_kst,))
-        cursor.execute("""
-        INSERT INTO favorite_routes (member_id, title, transit_type, station_id, station_name, route_no, target_destination, sort_order, created_at)
-        VALUES (3, '등교/학원 루트', 'BUS', '222000495', '평내유진아파트', '93', '호평동·평내중학교', 3, ?)
-        """, (now_kst,))
+    # 아이들 초기 안심 위치 기본값 시딩 (평내유진마젤란 인근)
+    for child in ["도비사랑녀", "미니미니채"]:
+        cursor.execute("SELECT username FROM user_locations WHERE username = ?", (child,))
+        if not cursor.fetchone():
+            cursor.execute("""
+            INSERT INTO user_locations (username, latitude, longitude, accuracy, address, landmark, battery_level, is_moving, updated_at)
+            VALUES (?, 37.6434558, 127.2311716, 15.0, '경기도 남양주시 평내동 평내유진마젤란', '집 (안심 구역)', 88, 0, ?)
+            """, (child, now_kst))
 
-    # 기본 평내동 단골 식당 시딩
-    cursor.execute("SELECT COUNT(*) FROM favorite_restaurants")
+    # 부모 초기 위치 시딩
+    for parent in ["미니미니", "Ljh"]:
+        cursor.execute("SELECT username FROM user_locations WHERE username = ?", (parent,))
+        if not cursor.fetchone():
+            cursor.execute("""
+            INSERT INTO user_locations (username, latitude, longitude, accuracy, address, landmark, battery_level, is_moving, updated_at)
+            VALUES (?, 37.6434558, 127.2311716, 10.0, '경기도 남양주시 평내동 평내유진마젤란', '집', 95, 0, ?)
+            """, (parent, now_kst))
+
+    # 초기 가족 전체 채팅 환영 메시지
+    cursor.execute("SELECT COUNT(*) FROM chat_messages")
     if cursor.fetchone()[0] == 0:
-        now_kst = datetime.now(KST).isoformat()
         cursor.execute("""
-        INSERT INTO favorite_restaurants (name, category, phone, address, distance_meters, business_hours, closed_days, family_note, created_at)
-        VALUES ('마젤란 숯불갈비', '한식/고기', '031-591-1234', '경기도 남양주시 평내로 145 상가동', 120, '11:30 ~ 22:00', '연중무휴', '주말 가족 외식 단골, 갈비탕 포장 가능', ?)
-        """, (now_kst,))
-        cursor.execute("""
-        INSERT INTO favorite_restaurants (name, category, phone, address, distance_meters, business_hours, closed_days, family_note, created_at)
-        VALUES ('호평 손칼국수 & 보쌈', '한식', '031-592-5678', '경기도 남양주시 늘을2로 14', 850, '11:00 ~ 21:00 (주말 21:30 마감)', '매주 화요일 휴무', '비 오는 날 칼국수 최고, 아이들 만두 좋아함', ?)
-        """, (now_kst,))
-        cursor.execute("""
-        INSERT INTO favorite_restaurants (name, category, phone, address, distance_meters, business_hours, closed_days, family_note, created_at)
-        VALUES ('카페 마젤란 포레스트', '카페/디저트', '031-593-9012', '경기도 남양주시 평내로 137', 250, '09:00 ~ 22:00 (주말 10:00 오픈)', '연중무휴', '주말 오전 브런치 추천, 야외 테라스 있음', ?)
+        INSERT INTO chat_messages (room_id, room_type, sender_username, sender_name, sender_avatar, text, is_read, created_at)
+        VALUES ('family_all', 'FAMILY_ALL', '미니미니', '아빠', '🐶', '우리가족챙기기 실시간 패밀리 톡방이 열렸어요! 모두 환영해요 🌿', 1, ?)
         """, (now_kst,))
 
     conn.commit()

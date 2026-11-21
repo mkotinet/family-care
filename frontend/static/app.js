@@ -3,9 +3,29 @@
  * 기능: 날씨 상세 타임라인, 카카오 지도 연동, 4인 가족 인증(하루퀴즈 연동), 실시간 아이 안심위치, 가족 전용 채팅방
  */
 
+// PWA beforeinstallprompt 전역 최우선 캡처 (브라우저 최초 파이어링 누락 방지)
+window.deferredPwaPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  window.deferredPwaPrompt = e;
+  console.log("[PWA] beforeinstallprompt captured.");
+  showPwaInstallBanner();
+  const btn = document.getElementById("btnPwaInstall");
+  if (btn) btn.style.display = "inline-flex";
+});
+
+window.addEventListener("appinstalled", () => {
+  console.log("[PWA] App successfully installed!");
+  window.deferredPwaPrompt = null;
+  const banner = document.getElementById("pwaInstallBanner");
+  if (banner) banner.style.display = "none";
+  const btn = document.getElementById("btnPwaInstall");
+  if (btn) btn.style.display = "none";
+});
+
 // 전역 상태
 const AppState = {
-  APP_VERSION: document.querySelector('meta[name="app-version"]')?.getAttribute('content') || '1.1.0',
+  APP_VERSION: document.querySelector('meta[name="app-version"]')?.getAttribute('content') || '1.3.1',
   versionMeta: null,
   isCheckingVersion: false,
   lastVersionCheckTime: 0,
@@ -31,7 +51,12 @@ const AppState = {
   safetyMarkers: [],
   currentChatRoom: "family_all",
   chatPollingTimer: null,
-  selectedLoginUser: "미니미니"
+  selectedLoginUser: "미니미니",
+  cachedTransitStops: [],
+  cachedTransitRoutes: [],
+  favoritePlaces: [],
+  selectedPlace: null,
+  safetyPollingTimer: null
 };
 
 // ==========================================
@@ -41,6 +66,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initClock();
   setupMobileLifecycle();
   initPwaServiceWorker();
+  checkPwaDisplayMode();
   await loadStoredSession();
   await initApp();
 
@@ -108,52 +134,70 @@ function setupMobileLifecycle() {
 }
 
 // ==========================================
-// PWA & Service Worker Engine (v1.3.0)
+// PWA & Service Worker Engine (v1.3.1)
 // ==========================================
-function initPwaServiceWorker() {
-  if (typeof window === "undefined") return;
-
-  // 1. beforeinstallprompt 캡처 (안드로이드 크롬 / 데스크톱)
-  window.addEventListener("beforeinstallprompt", (e) => {
-    e.preventDefault();
-    window.deferredPwaPrompt = e;
-    console.log("[PWA] beforeinstallprompt captured.");
-    const btn = document.getElementById("btnPwaInstall");
-    if (btn) btn.style.display = "inline-flex";
-  });
-
-  // 2. 앱 설치 완료 이벤트
-  window.addEventListener("appinstalled", () => {
-    console.log("[PWA] App successfully installed!");
-    window.deferredPwaPrompt = null;
-    const btn = document.getElementById("btnPwaInstall");
-    if (btn) btn.style.display = "none";
-  });
-
-  // 3. 루트 서비스 워커 등록
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("/sw.js", { scope: "/" })
-        .then((reg) => {
-          console.log("[PWA] Service Worker registered with scope:", reg.scope);
-        })
-        .catch((err) => {
-          console.warn("[PWA] Service Worker registration failed:", err);
-        });
-    });
-  }
-}
-
-// PWA 원클릭 설치 트리거
-async function triggerPwaInstall() {
-  if (window.deferredPwaPrompt) {
-    window.deferredPwaPrompt.prompt();
-    const { outcome } = await window.deferredPwaPrompt.userChoice;
-    console.log("[PWA] User choice outcome:", outcome);
-    window.deferredPwaPrompt = null;
+function checkPwaDisplayMode() {
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (isStandalone) {
+    console.log("[PWA] Running in Standalone App Mode.");
+    const banner = document.getElementById("pwaInstallBanner");
+    if (banner) banner.style.display = "none";
     const btn = document.getElementById("btnPwaInstall");
     if (btn) btn.style.display = "none";
   } else {
+    showPwaInstallBanner();
+  }
+}
+
+function showPwaInstallBanner() {
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (isStandalone) return;
+  if (sessionStorage.getItem("pwa_banner_dismissed") === "true") return;
+
+  const banner = document.getElementById("pwaInstallBanner");
+  if (banner) banner.style.display = "flex";
+  const btn = document.getElementById("btnPwaInstall");
+  if (btn) btn.style.display = "inline-flex";
+}
+
+function dismissPwaBanner() {
+  const banner = document.getElementById("pwaInstallBanner");
+  if (banner) banner.style.display = "none";
+  sessionStorage.setItem("pwa_banner_dismissed", "true");
+}
+
+function initPwaServiceWorker() {
+  if (typeof window === "undefined") return;
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js?v=1.3.1", { scope: "/" })
+      .then((reg) => {
+        console.log("[PWA] Service Worker registered with scope:", reg.scope);
+      })
+      .catch((err) => {
+        console.warn("[PWA] Service Worker registration failed:", err);
+      });
+  }
+}
+
+// PWA 원클릭 설치 트리거 (안드로이드 크롬 & 바로가기 가이드 지원)
+async function triggerPwaInstall() {
+  if (window.deferredPwaPrompt) {
+    try {
+      window.deferredPwaPrompt.prompt();
+      const choiceResult = await window.deferredPwaPrompt.userChoice;
+      console.log("[PWA] User response:", choiceResult.outcome);
+      if (choiceResult.outcome === "accepted") {
+        showToast("📲 홈 화면에 바로가기 앱이 추가되었습니다!", "success");
+        dismissPwaBanner();
+      }
+      window.deferredPwaPrompt = null;
+    } catch (err) {
+      console.warn("PWA prompt error:", err);
+      openPwaGuideModal();
+    }
+  } else {
+    // deferredPrompt가 아직 활성화되지 않은 안드로이드 브라우저/사파리인 경우 안내 모달 표출
     openPwaGuideModal();
   }
 }
@@ -591,6 +635,7 @@ async function loadFavorites() {
     const transit = await transitRes.json();
     const restaurants = await restRes.json();
     const places = await placesRes.json();
+    AppState.favoritePlaces = places || [];
 
     const items = [];
 
@@ -854,7 +899,22 @@ function renderLeafletCategoryMarkers(map) {
   if (!map) return;
   const cat = AppState.currentCategory;
 
-  if (cat === "restaurant" && AppState.cachedPlaces) {
+  if (cat === "transit" && AppState.cachedTransitStops) {
+    AppState.cachedTransitStops.forEach((s, idx) => {
+      const sLat = s.lat || (AppState.location.lat + (Math.sin(idx + 1) * 0.003));
+      const sLon = s.lon || (AppState.location.lon + (Math.cos(idx + 1) * 0.003));
+      const icon = L.divIcon({
+        className: 'cat-marker-pin',
+        html: `<div style="background:#0284c7;color:white;padding:3px 6px;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);border:1px solid #ffffff;">🚏 ${s.name}</div>`,
+        iconSize: [80, 24],
+        iconAnchor: [40, 12]
+      });
+      const marker = L.marker([sLat, sLon], { icon }).addTo(map);
+      marker.on("click", () => {
+        selectBusStopOnMap(s);
+      });
+    });
+  } else if (cat === "restaurant" && AppState.cachedPlaces) {
     AppState.cachedPlaces.forEach((p, idx) => {
       const pLat = AppState.location.lat + (Math.sin(idx + 1) * 0.005);
       const pLon = AppState.location.lon + (Math.cos(idx + 1) * 0.005);
@@ -865,14 +925,20 @@ function renderLeafletCategoryMarkers(map) {
         iconAnchor: [35, 12]
       });
       const marker = L.marker([pLat, pLon], { icon }).addTo(map);
-      marker.bindPopup(`
-        <div style="font-size:12px;">
-          <b>🍽️ ${p.name}</b><br>
-          <span style="color:#64748b;">${p.address || ''}</span><br>
-          <span style="color:#0ea5e9;font-weight:700;">${p.phone || ''}</span><br>
-          <button onclick="quickAddFavoritePlace('식당', '${p.name}', '${p.address || ''}', '${p.phone || ''}', '${p.status_badge || ''}')" style="margin-top:6px;padding:4px 8px;background:#10b981;color:white;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">⭐ 즐겨찾기 등록</button>
-        </div>
-      `);
+      marker.on("click", () => {
+        openSelectedPlaceCard({
+          category: "식당",
+          categoryTitle: "🍽️ 추천 맛집",
+          categoryClass: "restaurant",
+          name: p.name,
+          address: p.address || "경기도 남양주시 평내동",
+          phone: p.phone,
+          status_info: p.status_badge || "영업중",
+          lat: pLat,
+          lon: pLon,
+          extraHtml: `<div style="color: #ea580c; font-weight: 700;">${p.status_badge || '평내 단골 인기 식당'}</div>`
+        });
+      });
     });
   } else if (cat === "hospital" && AppState.cachedHospitals) {
     AppState.cachedHospitals.forEach((h, idx) => {
@@ -886,14 +952,20 @@ function renderLeafletCategoryMarkers(map) {
         iconAnchor: [35, 12]
       });
       const marker = L.marker([hLat, hLon], { icon }).addTo(map);
-      marker.bindPopup(`
-        <div style="font-size:12px;">
-          <b>${isPharm ? '💊' : '🏥'} ${h.name}</b> (${h.status_badge || ''})<br>
-          <span style="color:#64748b;">${h.address || ''}</span><br>
-          <span style="color:#0ea5e9;font-weight:700;">${h.phone || ''}</span><br>
-          <button onclick="quickAddFavoritePlace('${h.type}', '${h.name}', '${h.address || ''}', '${h.phone || ''}', '${h.status_badge || ''}')" style="margin-top:6px;padding:4px 8px;background:#10b981;color:white;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">⭐ 즐겨찾기 등록</button>
-        </div>
-      `);
+      marker.on("click", () => {
+        openSelectedPlaceCard({
+          category: h.type,
+          categoryTitle: isPharm ? "💊 안심 약국" : "🏥 안심 병원",
+          categoryClass: isPharm ? "pharmacy" : "hospital",
+          name: h.name,
+          address: h.address || "경기도 남양주시 평내동",
+          phone: h.phone,
+          status_info: h.status_badge,
+          lat: hLat,
+          lon: hLon,
+          extraHtml: `<div style="color: ${isPharm ? '#059669' : '#2563eb'}; font-weight: 700;">${h.status_badge || ''}</div>`
+        });
+      });
     });
   }
 }
@@ -935,30 +1007,233 @@ function renderKakaoCategoryMarkers() {
 
   const cat = AppState.currentCategory;
 
-  if (cat === "restaurant" && AppState.cachedPlaces) {
-    AppState.cachedPlaces.forEach(p => {
+  if (cat === "transit" && AppState.cachedTransitStops) {
+    AppState.cachedTransitStops.forEach((s, idx) => {
+      const sLat = s.lat || (AppState.location.lat + (Math.sin(idx + 1) * 0.003));
+      const sLon = s.lon || (AppState.location.lon + (Math.cos(idx + 1) * 0.003));
+      const pos = new kakao.maps.LatLng(sLat, sLon);
       const marker = new kakao.maps.Marker({
-        position: new kakao.maps.LatLng(AppState.location.lat + (Math.random() - 0.5) * 0.008, AppState.location.lon + (Math.random() - 0.5) * 0.008),
+        position: pos,
+        map: AppState.kakaoCategoryMap
+      });
+      AppState.categoryMarkers.push(marker);
+
+      const overlay = new kakao.maps.CustomOverlay({
+        position: pos,
+        content: `<div style="background:#0284c7;color:white;padding:3px 7px;border-radius:8px;font-size:11px;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,0.25);cursor:pointer;white-space:nowrap;">🚏 ${s.name}</div>`,
+        yAnchor: 2.4
+      });
+      overlay.setMap(AppState.kakaoCategoryMap);
+      AppState.categoryMarkers.push(overlay);
+
+      kakao.maps.event.addListener(marker, "click", () => {
+        selectBusStopOnMap(s);
+      });
+    });
+  } else if (cat === "restaurant" && AppState.cachedPlaces) {
+    AppState.cachedPlaces.forEach(p => {
+      const pLat = AppState.location.lat + (Math.random() - 0.5) * 0.008;
+      const pLon = AppState.location.lon + (Math.random() - 0.5) * 0.008;
+      const pos = new kakao.maps.LatLng(pLat, pLon);
+      const marker = new kakao.maps.Marker({
+        position: pos,
         map: AppState.kakaoCategoryMap
       });
       AppState.categoryMarkers.push(marker);
 
       kakao.maps.event.addListener(marker, "click", () => {
-        quickAddFavoritePlace("식당", p.name, p.address, p.phone, p.status_badge);
+        openSelectedPlaceCard({
+          category: "식당",
+          categoryTitle: "🍽️ 추천 맛집",
+          categoryClass: "restaurant",
+          name: p.name,
+          address: p.address || "경기도 남양주시 평내동",
+          phone: p.phone,
+          status_info: p.status_badge || "영업중",
+          lat: pLat,
+          lon: pLon,
+          extraHtml: `<div style="color: #ea580c; font-weight: 700;">${p.status_badge || '평내 단골 인기 식당'}</div>`
+        });
       });
     });
   } else if (cat === "hospital" && AppState.cachedHospitals) {
     AppState.cachedHospitals.forEach(h => {
+      const hLat = AppState.location.lat + (Math.random() - 0.5) * 0.006;
+      const hLon = AppState.location.lon + (Math.random() - 0.5) * 0.006;
+      const pos = new kakao.maps.LatLng(hLat, hLon);
+      const isPharm = (h.type === "약국");
       const marker = new kakao.maps.Marker({
-        position: new kakao.maps.LatLng(AppState.location.lat + (Math.random() - 0.5) * 0.006, AppState.location.lon + (Math.random() - 0.5) * 0.006),
+        position: pos,
         map: AppState.kakaoCategoryMap
       });
       AppState.categoryMarkers.push(marker);
 
       kakao.maps.event.addListener(marker, "click", () => {
-        quickAddFavoritePlace(h.type, h.name, h.address, h.phone, h.status_badge);
+        openSelectedPlaceCard({
+          category: h.type,
+          categoryTitle: isPharm ? "💊 안심 약국" : "🏥 안심 병원",
+          categoryClass: isPharm ? "pharmacy" : "hospital",
+          name: h.name,
+          address: h.address || "경기도 남양주시 평내동",
+          phone: h.phone,
+          status_info: h.status_badge,
+          lat: hLat,
+          lon: hLon,
+          extraHtml: `<div style="color: ${isPharm ? '#059669' : '#2563eb'}; font-weight: 700;">${h.status_badge || ''}</div>`
+        });
       });
     });
+  }
+}
+
+// ==========================================
+// 지도 선택 장소 카드 & 버스 정류소 도착 인터랙션
+// ==========================================
+function openSelectedPlaceCard(data) {
+  AppState.selectedPlace = data;
+  const card = document.getElementById("mapSelectedPlaceCard");
+  if (!card) return;
+
+  const badgeEl = document.getElementById("selPlaceCatBadge");
+  const nameEl = document.getElementById("selPlaceName");
+  const addrEl = document.getElementById("selPlaceAddress");
+  const phoneEl = document.getElementById("selPlacePhone");
+  const extraBox = document.getElementById("selPlaceExtraBox");
+
+  if (badgeEl) {
+    badgeEl.textContent = data.categoryTitle || data.category;
+    badgeEl.className = `selected-badge ${data.categoryClass || 'transit'}`;
+  }
+  if (nameEl) nameEl.textContent = data.name;
+  if (addrEl) addrEl.textContent = data.address || "경기도 남양주시 평내동";
+
+  if (phoneEl) {
+    if (data.phone) {
+      phoneEl.style.display = "block";
+      phoneEl.textContent = `📞 ${data.phone}`;
+    } else {
+      phoneEl.style.display = "none";
+    }
+  }
+
+  if (extraBox) {
+    if (data.extraHtml) {
+      extraBox.style.display = "block";
+      extraBox.innerHTML = data.extraHtml;
+    } else {
+      extraBox.style.display = "none";
+    }
+  }
+
+  updateSelectedFavButtonState(data.name);
+  card.style.display = "block";
+}
+
+function updateSelectedFavButtonState(placeName) {
+  const btn = document.getElementById("btnToggleSelectedFav");
+  const star = document.getElementById("selFavStar");
+  const text = document.getElementById("selFavText");
+  if (!btn) return;
+
+  const isFav = (AppState.favoritePlaces || []).some(p => p.name === placeName);
+  if (isFav) {
+    btn.className = "btn-card-toggle-fav is-favorite";
+    if (star) star.textContent = "★";
+    if (text) text.textContent = "즐겨찾기 취소";
+  } else {
+    btn.className = "btn-card-toggle-fav";
+    if (star) star.textContent = "☆";
+    if (text) text.textContent = "즐겨찾기 등록";
+  }
+}
+
+function closeSelectedPlaceCard() {
+  const card = document.getElementById("mapSelectedPlaceCard");
+  if (card) card.style.display = "none";
+  AppState.selectedPlace = null;
+}
+
+async function toggleSelectedPlaceFavorite() {
+  const p = AppState.selectedPlace;
+  if (!p) return;
+  await toggleFavoritePlace(p.category, p.name, p.address, p.phone, p.status_info, p.lat, p.lon);
+}
+
+function navigateSelectedPlace() {
+  const p = AppState.selectedPlace;
+  if (!p) return;
+  const targetLat = p.lat || AppState.location.lat;
+  const targetLon = p.lon || AppState.location.lon;
+  const url = `https://map.kakao.com/link/to/${encodeURIComponent(p.name)},${targetLat},${targetLon}`;
+  window.open(url, "_blank");
+}
+
+// 버스 정류소 핀 클릭 시 실시간 도착 정보 조회 및 카드 렌더링
+async function selectBusStopOnMap(stop) {
+  const sLat = stop.lat || (AppState.location.lat + 0.001);
+  const sLon = stop.lon || (AppState.location.lon - 0.001);
+
+  if (AppState.mapEngine === "kakao" && AppState.kakaoCategoryMap) {
+    AppState.kakaoCategoryMap.panTo(new kakao.maps.LatLng(sLat, sLon));
+  } else if (AppState.leafletCategoryMap) {
+    AppState.leafletCategoryMap.panTo([sLat, sLon]);
+  }
+
+  openSelectedPlaceCard({
+    category: "교통",
+    categoryTitle: "🚏 버스 정류소",
+    categoryClass: "transit",
+    name: stop.name,
+    address: `남양주시 평내동 (집에서 약 ${stop.distance || 120}m)`,
+    phone: "",
+    status_info: "실시간 노선 운행 중",
+    lat: sLat,
+    lon: sLon,
+    extraHtml: `<div style="color: #64748b; padding: 4px;">도착 예정 버스 정보 조회 중... 🚌</div>`
+  });
+
+  try {
+    const res = await fetch(`/api/transit/station-arrivals?station_name=${encodeURIComponent(stop.name)}`);
+    const data = await res.json();
+    const arrivals = data.arrivals || [];
+
+    let extraHtml = "";
+    if (arrivals.length > 0) {
+      extraHtml = `
+        <div style="font-weight: 800; color: #0369a1; margin-bottom: 6px;">🚌 실시간 도착 예정 버스 (${arrivals.length}대)</div>
+        <div class="station-arrival-list">
+          ${arrivals.map(a => `
+            <div class="station-arrival-item">
+              <div>
+                <span class="bus-num-pill" style="background: ${a.badge_color};">${a.route_no}</span>
+                <span style="font-weight: 700; margin-left: 6px; color: #334155;">➔ ${a.destination}</span>
+              </div>
+              <div style="text-align: right;">
+                <span style="font-weight: 800; color: #e11d48;">${a.remain_time}</span>
+                <span style="font-size: 10px; color: #64748b; margin-left: 4px;">(${a.remain_stops})</span>
+              </div>
+            </div>
+          `).join("")}
+        </div>
+        <div style="margin-top: 8px; text-align: right;">
+          <button class="btn-mini btn-fav" onclick="selectStartStation('${stop.name}')">+ 이 정류소로 새 루트 등록</button>
+        </div>
+      `;
+    } else {
+      extraHtml = `
+        <div style="color: #64748b; font-size: 11px;">현재 운행 중인 도착 예정 버스가 없습니다.</div>
+        <div style="margin-top: 6px;">
+          <button class="btn-mini btn-fav" onclick="selectStartStation('${stop.name}')">+ 이 정류소로 새 루트 등록</button>
+        </div>
+      `;
+    }
+
+    const extraBox = document.getElementById("selPlaceExtraBox");
+    if (extraBox && AppState.selectedPlace && AppState.selectedPlace.name === stop.name) {
+      extraBox.innerHTML = extraHtml;
+    }
+  } catch (e) {
+    console.warn("fetch station arrivals error:", e);
   }
 }
 
@@ -1015,22 +1290,30 @@ async function renderTransitDetail(el) {
   ]);
   const routes = await res.json();
   const stops = await stopsRes.json();
+  AppState.cachedTransitStops = stops || [];
+  AppState.cachedTransitRoutes = routes || [];
 
   el.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-      <span style="font-size: 13px; font-weight: 800;">📍 내 주변 버스 정류소 (출발지 선택)</span>
+      <span style="font-size: 13px; font-weight: 800;">📍 내 주변 버스 정류소 (터치 시 실시간 도착 정보)</span>
       <button class="btn-mini btn-fav" onclick="openRouteModal()">+ 새 루트 등록</button>
     </div>
 
-    <div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 14px;">
+    <div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 12px;">
       ${stops.map(s => `
-        <div style="flex: 0 0 auto; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 6px 10px; font-size: 11px; cursor: pointer;" onclick="selectStartStation('${s.name}')">
-          🚏 <strong>${s.name}</strong> (${s.distance}m)
+        <div style="flex: 0 0 auto; background: #f0f9ff; border: 1.5px solid #bae6fd; border-radius: 10px; padding: 7px 12px; font-size: 12px; cursor: pointer; transition: all 0.15s;" onclick="selectBusStopFromList('${s.name}')">
+          🚏 <strong>${s.name}</strong> <span style="font-size: 10px; color: #0284c7;">(${s.distance}m)</span>
         </div>
       `).join("")}
     </div>
 
-    <div style="font-size: 13px; font-weight: 800; margin-bottom: 8px;">🚌 실시간 등록 루트 도착 현황</div>
+    <!-- 목록에서 선택한 정류소 실시간 도착 버스 정보 영역 -->
+    <div id="listSelectedStopArrivals" style="margin-bottom: 14px;"></div>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+      <span style="font-size: 13px; font-weight: 800;">🚌 실시간 등록 루트 도착 현황</span>
+      <span style="font-size: 11px; color: #0284c7; font-weight: 700;">상단 🗺️ 지도 탭에서도 정류소 선택 가능</span>
+    </div>
     <div style="display: flex; flex-direction: column; gap: 8px;">
       ${routes.map(r => `
         <div class="item-card">
@@ -1044,6 +1327,58 @@ async function renderTransitDetail(el) {
       `).join("")}
     </div>
   `;
+}
+
+// 목록에서 정류소 탭 시 실시간 도착 버스 정보 노출 헬퍼
+async function selectBusStopFromList(stationName) {
+  const container = document.getElementById("listSelectedStopArrivals");
+  if (!container) return;
+
+  container.innerHTML = `
+    <div style="background: #f8fafc; border: 1.5px solid #0284c7; border-radius: 12px; padding: 12px; animation: fadeIn 0.2s;">
+      <div style="font-size: 12px; color: #64748b;">🚏 <strong>${stationName}</strong> 도착 정보 조회 중... 🚌</div>
+    </div>
+  `;
+
+  try {
+    const res = await fetch(`/api/transit/station-arrivals?station_name=${encodeURIComponent(stationName)}`);
+    const data = await res.json();
+    const arrivals = data.arrivals || [];
+
+    if (arrivals.length > 0) {
+      container.innerHTML = `
+        <div style="background: #f8fafc; border: 1.5px solid #0284c7; border-radius: 12px; padding: 12px; animation: fadeIn 0.2s;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span style="font-size: 13px; font-weight: 800; color: #0284c7;">🚏 ${stationName} 실시간 도착 버스 (${arrivals.length}대)</span>
+            <button class="btn-mini btn-fav" onclick="selectStartStation('${stationName}')">+ 이 정류소로 새 루트 등록</button>
+          </div>
+          <div class="station-arrival-list">
+            ${arrivals.map(a => `
+              <div class="station-arrival-item">
+                <div>
+                  <span class="bus-num-pill" style="background: ${a.badge_color};">${a.route_no}</span>
+                  <span style="font-weight: 700; margin-left: 6px; color: #334155;">➔ ${a.destination}</span>
+                </div>
+                <div style="text-align: right;">
+                  <span style="font-weight: 800; color: #e11d48;">${a.remain_time}</span>
+                  <span style="font-size: 10px; color: #64748b; margin-left: 4px;">(${a.remain_stops})</span>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    } else {
+      container.innerHTML = `
+        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 12px; padding: 10px; font-size: 12px; color: #64748b;">
+          🚏 ${stationName}: 현재 운행 중인 버스 정보가 없습니다.
+          <button class="btn-mini btn-fav" style="margin-left: 8px;" onclick="selectStartStation('${stationName}')">+ 루트 등록</button>
+        </div>
+      `;
+    }
+  } catch (err) {
+    container.innerHTML = "";
+  }
 }
 
 async function renderHospitalDetail(el) {
@@ -1163,8 +1498,12 @@ async function renderHealthDetail(el) {
   `;
 }
 
-// 즐겨찾기 즉시 저장 헬퍼
+// 즐겨찾기 즉시 저장/취소 원터치 토글 헬퍼
 async function quickAddFavoritePlace(category, name, address, phone, status_info) {
+  await toggleFavoritePlace(category, name, address, phone, status_info);
+}
+
+async function toggleFavoritePlace(category, name, address = "", phone = "", status_info = "", lat = null, lon = null) {
   try {
     const res = await fetch("/api/places/favorite", {
       method: "POST",
@@ -1176,15 +1515,22 @@ async function quickAddFavoritePlace(category, name, address, phone, status_info
         address,
         phone,
         status_info,
-        latitude: AppState.location.lat,
-        longitude: AppState.location.lon
+        latitude: lat || AppState.location.lat,
+        longitude: lon || AppState.location.lon
       })
     });
     const d = await res.json();
-    alert(`⭐ '${name}' 항목이 우리 가족 즐겨찾기에 등록되었습니다!`);
-    loadFavorites();
+    if (d.action === "removed" || d.is_favorite === false) {
+      showToast(`🗑️ '${name}' 즐겨찾기가 취소되었습니다.`, "info");
+    } else {
+      showToast(`⭐ '${name}' 항목이 즐겨찾기에 등록되었습니다!`, "success");
+    }
+    await loadFavorites();
+    if (AppState.selectedPlace && AppState.selectedPlace.name === name) {
+      updateSelectedFavButtonState(name);
+    }
   } catch (e) {
-    alert("즐겨찾기 저장 중 오류가 발생했습니다.");
+    showToast("즐겨찾기 처리 중 오류가 발생했습니다.", "error");
   }
 }
 
@@ -1224,6 +1570,25 @@ async function openSafetyModal() {
   const modal = document.getElementById("modalSafetyMap");
   modal.className = "modal-overlay active";
 
+  await fetchFamilyLocations();
+  startSafetyPolling();
+}
+
+function startSafetyPolling() {
+  stopSafetyPolling();
+  AppState.safetyPollingTimer = setInterval(() => {
+    fetchFamilyLocations(true);
+  }, 10000);
+}
+
+function stopSafetyPolling() {
+  if (AppState.safetyPollingTimer) {
+    clearInterval(AppState.safetyPollingTimer);
+    AppState.safetyPollingTimer = null;
+  }
+}
+
+async function fetchFamilyLocations(isSilent = false) {
   const timeHeader = document.getElementById("safetyLastCheckTime");
   const now = new Date();
   const kstTime = new Intl.DateTimeFormat("ko-KR", {
@@ -1256,7 +1621,7 @@ async function openSafetyModal() {
         locationTitle = `📍 ${c.landmark || c.address}`;
         if (c.is_manual) {
           locationBadge = '<span style="font-size: 9px; padding: 2px 6px; background: #fef08a; color: #854d0e; border-radius: 4px; font-weight: 800;">부모 수동지정</span>';
-          locationDesc = `📌 자녀가 현재 미로그인 상태여서 부모가 설정한 장소('${c.landmark}')를 표시 중입니다 (${c.time_diff_desc} 지정). 자녀가 스마트폰에서 로그인 시 실시간 GPS로 자동 전환됩니다.`;
+          locationDesc = `📌 부모가 수동 설정한 장소('${c.landmark}') 표시 중 (${c.time_diff_desc} 지정). 자녀가 스마트폰에서 로그인 시 실시간 GPS로 자동 갱신됩니다.`;
         } else {
           locationBadge = '<span style="font-size: 9px; padding: 2px 6px; background: #bbf7d0; color: #166534; border-radius: 4px; font-weight: 800;">실시간 GPS</span>';
           locationDesc = `GPS 수신: ${c.time_diff_desc} (${c.updated_at}) | 🔋 ${c.battery_level ? c.battery_level + '%' : '--'} | ${c.is_moving ? '🏃 이동 중' : '🛑 정지'}`;
@@ -1324,7 +1689,42 @@ function closeSafetyModal(e) {
   if (e && e.target && e.target.id !== "modalSafetyMap" && !e.target.classList.contains("sheet-close-btn") && !e.target.classList.contains("btn-secondary")) {
     return;
   }
+  stopSafetyPolling();
   document.getElementById("modalSafetyMap").className = "modal-overlay";
+}
+
+// 실측 검증 시뮬레이터 토글 & 실행 함수
+function toggleSafetyTestPanel() {
+  const body = document.getElementById("safetyTestPanelBody");
+  const arrow = document.getElementById("testPanelArrow");
+  if (!body) return;
+  const isHidden = body.style.display === "none";
+  body.style.display = isHidden ? "flex" : "none";
+  if (arrow) arrow.textContent = isHidden ? "▲" : "▼";
+}
+
+async function simulateChildLocation(username, placeName, lat, lon, isManual = false) {
+  try {
+    const res = await fetch("/api/location/test-simulate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username,
+        latitude: lat,
+        longitude: lon,
+        accuracy: 8.0,
+        battery_level: 88,
+        is_moving: false,
+        is_manual: isManual,
+        landmark: placeName
+      })
+    });
+    const d = await res.json();
+    showToast(`🧪 [검증] ${username} 위치가 '${placeName}'(으)로 갱신되었습니다!`, "success");
+    await fetchFamilyLocations();
+  } catch (err) {
+    showToast("위치 시뮬레이션 중 오류가 발생했습니다.", "error");
+  }
 }
 
 async function initSafetyKakaoMap(children) {

@@ -163,6 +163,11 @@ def init_db():
         created_at TEXT NOT NULL
     )
     """)
+    for col in ["user_username TEXT", "dest_station_name TEXT", "dest_station_id TEXT", "target_destination TEXT"]:
+        try:
+            cursor.execute(f"ALTER TABLE favorite_routes ADD COLUMN {col}")
+        except Exception:
+            pass
 
     # 7. 단골 식당 테이블
     cursor.execute("""

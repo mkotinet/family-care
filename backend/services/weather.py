@@ -11,22 +11,24 @@ from backend.mock_data import get_simulated_weather
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
 def get_outfit_advice(temp: float):
-    if temp >= 28:
-        return "민소매, 반팔, 린넨 바지 등 얇고 통풍이 잘되는 옷을 입으세요 🎽", "👕"
-    elif temp >= 23:
-        return "반팔, 얇은 셔츠, 반바지 또는 면바지가 적당해요 👕", "👕"
-    elif temp >= 20:
-        return "긴팔 티, 블라우스, 얇은 가디건, 슬랙스를 추천해요 👚", "👚"
-    elif temp >= 17:
-        return "가디건, 니트, 맨투맨, 청바지가 포근하고 좋아요 🧥", "🧥"
-    elif temp >= 12:
-        return "자켓, 셔츠 위에 가디건, 간절기 외투를 챙기세요 🧥", "🧥"
-    elif temp >= 9:
-        return "트렌치코트, 야상, 도톰한 점퍼로 따뜻하게 챙겨 입으세요 🧥", "🧥"
-    elif temp >= 5:
-        return "울 코트, 가죽 자켓, 히트텍, 기모 옷을 추천해요 🧤", "🧤"
-    else:
+    if temp <= 0:
+        return f"현재 {temp}℃로 영하의 강추위예요! 롱패딩, 두꺼운 코트, 목도리와 방한장갑으로 든든하게 보온하세요 🧣", "🧣"
+    elif temp < 5:
         return "패딩, 두꺼운 코트, 목도리와 장갑 등 보온에 각별히 신경 쓰세요 🧣", "🧣"
+    elif temp < 9:
+        return "울 코트, 가죽 자켓, 히트텍, 기모 옷을 추천해요 🧤", "🧤"
+    elif temp < 12:
+        return "트렌치코트, 야상, 도톰한 점퍼로 따뜻하게 챙겨 입으세요 🧥", "🧥"
+    elif temp < 17:
+        return "자켓, 셔츠 위에 가디건, 간절기 외투를 챙기세요 🧥", "🧥"
+    elif temp < 20:
+        return "가디건, 니트, 맨투맨, 청바지가 포근하고 좋아요 🧥", "🧥"
+    elif temp < 23:
+        return "긴팔 티, 블라우스, 얇은 가디건, 슬랙스를 추천해요 👚", "👚"
+    elif temp < 28:
+        return "반팔, 얇은 셔츠, 반바지 또는 면바지가 적당해요 👕", "👕"
+    else:
+        return "민소매, 반팔, 린넨 바지 등 얇고 통풍이 잘되는 옷을 입으세요 🎽", "👕"
 
 def sky_to_icon(sky_code: int, pty_code: int = 0, is_night: bool = False):
     if pty_code in [1, 5]:
@@ -44,7 +46,7 @@ def sky_to_icon(sky_code: int, pty_code: int = 0, is_night: bool = False):
     return "☀️", "맑음"
 
 async def get_weather_data(lat: float, lon: float):
-    cache_key = f"weather_real_v3_{round(lat, 3)}_{round(lon, 3)}"
+    cache_key = f"weather_real_v5_{round(lat, 3)}_{round(lon, 3)}"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
@@ -284,6 +286,33 @@ async def get_weather_data(lat: float, lon: float):
         advice, icon = get_outfit_advice(curr_temp)
         weather_data["outfit_recommendation"] = advice
         weather_data["outfit_icon"] = icon
+
+        is_night = (now.hour >= 19 or now.hour < 7)
+        if pty_val in [1, 5]:
+            w_desc = "비"
+            w_icon = "🌧️"
+        elif pty_val in [2, 6]:
+            w_desc = "비/눈"
+            w_icon = "🌨️"
+        elif pty_val in [3, 7]:
+            w_desc = "눈"
+            w_icon = "❄️"
+        else:
+            curr_slot_key = now.strftime("%Y%m%d_%H00")
+            curr_sky = 1
+            if curr_slot_key in slot_map:
+                curr_sky = int(slot_map[curr_slot_key].get("SKY", 1))
+            elif sorted_keys:
+                curr_sky = int(slot_map[sorted_keys[0]].get("SKY", 1))
+            w_icon, w_desc = sky_to_icon(curr_sky, 0, is_night)
+
+        weather_data["weather_desc"] = w_desc
+        weather_data["weather_state"] = w_desc
+        weather_data["weather_icon"] = w_icon
+
+        if weekly_forecast:
+            weather_data["temp_min"] = weekly_forecast[0]["temp_min"]
+            weather_data["temp_max"] = weekly_forecast[0]["temp_max"]
 
         weather_data["hourly"] = hourly_forecast
         weather_data["three_hourly"] = three_hourly_forecast

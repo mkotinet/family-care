@@ -15,7 +15,7 @@ from backend.services.location import update_user_location, get_family_locations
 from backend.services.chat import get_chat_rooms, get_messages, send_message
 from backend.services.places import add_favorite_place, get_favorite_places, remove_favorite_place
 from backend.services.weather import get_weather_data
-from backend.services.transit import get_transit_routes, add_favorite_route, search_nearby_bus_stops
+from backend.services.transit import get_transit_routes, add_favorite_route, search_nearby_bus_stops, get_station_arrivals
 from backend.services.hospital import get_hospital_pharmacy_info
 from backend.services.restaurant import get_favorite_restaurants, add_favorite_restaurant, search_places_kakao
 from backend.services.health import get_health_alerts
@@ -100,6 +100,7 @@ async def health_check():
     }
 
 @app.get("/api/version")
+@app.get("/version.json")
 async def get_app_version():
     """하루퀴즈 포맷: version.json 기반 동적 버전 메타데이터 (Cache-Control: no-cache)"""
     v_file = BASE_DIR / "version.json"
@@ -196,6 +197,20 @@ async def api_location_manual_set(payload: dict = Body(...)):
     res = await update_user_location(username, lat, lon, accuracy=5.0, battery=battery, is_moving=False, is_manual=True, custom_landmark=landmark)
     return res
 
+@app.post("/api/location/test-simulate")
+async def api_location_test_simulate(payload: dict = Body(...)):
+    """자녀 실시간 위치/GPS 실측 검증 시뮬레이션"""
+    username = payload.get("username", "도비사랑녀")
+    lat = float(payload.get("latitude", 37.653412))
+    lon = float(payload.get("longitude", 127.244123))
+    accuracy = float(payload.get("accuracy", 8.0))
+    battery = int(payload.get("battery_level", 85))
+    is_moving = bool(payload.get("is_moving", False))
+    is_manual = bool(payload.get("is_manual", False))
+    landmark = payload.get("landmark")
+    res = await update_user_location(username, lat, lon, accuracy=accuracy, battery=battery, is_moving=is_moving, is_manual=is_manual, custom_landmark=landmark)
+    return res
+
 @app.post("/api/location/request-ping")
 async def api_location_request_ping(payload: dict = Body(...)):
     """자녀에게 실시간 위치 전송 요청 톡 발송"""
@@ -282,6 +297,12 @@ async def api_transit_nearby_stops(lat: float = Query(None), lon: float = Query(
     lon = lon if lon is not None else DEFAULT_LOCATION["lon"]
     stops = await search_nearby_bus_stops(lat, lon, radius)
     return stops
+
+@app.get("/api/transit/station-arrivals")
+async def api_transit_station_arrivals(station_name: str = Query(...)):
+    """특정 정류소의 실시간 버스 도착 정보 조회"""
+    data = await get_station_arrivals(station_name)
+    return data
 
 @app.post("/api/transit/add")
 async def api_transit_add(payload: dict = Body(...)):

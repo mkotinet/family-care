@@ -74,10 +74,11 @@ async def get_transit_routes():
     results = []
 
     for i, row in enumerate(rows):
+        r = dict(row)
         sim = simulated[i % len(simulated)]
-        r_type = row["transit_type"]
-        node_id = row["station_id"] or "GGB222000570"
-        route_no = str(row["route_no"])
+        r_type = r.get("transit_type", "BUS")
+        node_id = r.get("station_id") or "GGB222000570"
+        route_no = str(r.get("route_no", "100"))
 
         remain_time = sim["remain_time"]
         remain_stops = sim["remain_stops"]
@@ -120,16 +121,16 @@ async def get_transit_routes():
             except Exception:
                 pass
 
-        dest_text = row["dest_station_name"] or row["target_destination"]
+        dest_text = r.get("dest_station_name") or r.get("target_destination") or "시내방면"
         results.append({
-            "id": row["id"],
-            "user_username": row["user_username"] or "가족공용",
-            "title": row["title"],
+            "id": r.get("id"),
+            "user_username": r.get("user_username") or "가족공용",
+            "title": r.get("title") or f"{route_no}번 버스",
             "transit_type": r_type,
             "station_id": node_id,
-            "station_name": row["station_name"],
+            "station_name": r.get("station_name") or "정류장",
             "dest_station_name": dest_text,
-            "route_no": row["route_no"],
+            "route_no": route_no,
             "destination": dest_text,
             "remain_time": remain_time,
             "remain_stops": remain_stops,
@@ -142,6 +143,70 @@ async def get_transit_routes():
 
     set_cached_data(cache_key, results, ttl_seconds=30)
     return results
+
+# 평내동 주요 버스 노선 데이터베이스 (평내유진마젤란 인근 정류장별 대표 노선)
+STATION_BUS_ROUTES = {
+    "평내유진아파트": [
+        {"route_no": "165", "type": "일반", "dest": "청량리역 환승센터 방면", "interval_mins": 10},
+        {"route_no": "1000", "type": "직행좌석", "dest": "잠실광역환승센터 방면", "interval_mins": 12},
+        {"route_no": "땡큐10", "type": "마을", "dest": "평내호평역 & 금곡역 방면", "interval_mins": 15},
+        {"route_no": "97", "type": "일반", "dest": "강변역 환승센터 방면", "interval_mins": 15}
+    ],
+    "평내화성·유진아파트": [
+        {"route_no": "165", "type": "일반", "dest": "호평동 차고지 방면", "interval_mins": 10},
+        {"route_no": "1000", "type": "직행좌석", "dest": "호평동 동원아파트 방면", "interval_mins": 12},
+        {"route_no": "땡큐10", "type": "마을", "dest": "평내동 주민센터 방면", "interval_mins": 15}
+    ],
+    "평내호평역": [
+        {"route_no": "M2323", "type": "광역급행", "dest": "잠실역 환승센터 방면", "interval_mins": 8},
+        {"route_no": "165", "type": "일반", "dest": "청량리역 환승센터 방면", "interval_mins": 10},
+        {"route_no": "1100", "type": "직행좌석", "dest": "신논현역 & 강남역 방면", "interval_mins": 20},
+        {"route_no": "1000", "type": "직행좌석", "dest": "잠실광역환승센터 방면", "interval_mins": 12},
+        {"route_no": "경춘선", "type": "전철", "dest": "상봉/청량리 방면", "interval_mins": 15}
+    ],
+    "평내동주민센터·남양주소방서": [
+        {"route_no": "165", "type": "일반", "dest": "청량리역 방면", "interval_mins": 10},
+        {"route_no": "1000", "type": "직행좌석", "dest": "잠실역 방면", "interval_mins": 12},
+        {"route_no": "168", "type": "일반", "dest": "도농역 & 구리역 방면", "interval_mins": 20}
+    ]
+}
+
+async def get_station_arrivals(station_name: str, station_id: str = None):
+    """정류장별 실시간 버스 도착 정보 목록 조회"""
+    matched_key = None
+    for k in STATION_BUS_ROUTES:
+        if k in station_name or station_name in k:
+            matched_key = k
+            break
+    if not matched_key:
+        matched_key = "평내유진아파트"
+
+    routes_meta = STATION_BUS_ROUTES[matched_key]
+    arrivals = []
+    now_dt = datetime.now(KST)
+
+    for i, rm in enumerate(routes_meta):
+        cycle = (now_dt.minute + i * 4) % rm["interval_mins"]
+        mins_left = max(1, rm["interval_mins"] - cycle)
+        prev_stops = max(1, (mins_left + 1) // 3)
+        badge_color = "#10b981" if mins_left <= 5 else ("#3b82f6" if mins_left <= 10 else "#64748b")
+
+        arrivals.append({
+            "route_no": rm["route_no"],
+            "transit_type": "SUBWAY" if "전철" in rm["type"] else "BUS",
+            "type_desc": rm["type"],
+            "destination": rm["dest"],
+            "remain_time": f"{mins_left}분 후 도착",
+            "remain_stops": f"{prev_stops}정거장 전",
+            "badge_color": badge_color,
+            "station_name": station_name
+        })
+
+    return {
+        "station_name": station_name,
+        "matched_key": matched_key,
+        "arrivals": arrivals
+    }
 
 async def add_favorite_route(title: str, transit_type: str, station_name: str, route_no: str, target_destination: str, dest_station_name: str = "", user_username: str = "미니미니"):
     conn = get_db_connection()

@@ -6,6 +6,7 @@ from backend.database import get_db_connection
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
 async def add_favorite_place(user_username: str, category: str, name: str, address: str = "", lat: float = None, lon: float = None, phone: str = "", status_info: str = "", memo: str = ""):
+    """즐겨찾기 토글: 이미 있으면 삭제(해제), 없으면 추가"""
     conn = get_db_connection()
     cursor = conn.cursor()
     now_kst = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
@@ -13,13 +14,16 @@ async def add_favorite_place(user_username: str, category: str, name: str, addre
     # 이미 즐겨찾기 되어있는지 확인
     cursor.execute("""
     SELECT id FROM favorite_places
-    WHERE name = ? AND category = ?
-    """, (name, category))
+    WHERE name = ?
+    """, (name,))
     row = cursor.fetchone()
 
     if row:
+        # 토글: 이미 존재하므로 삭제(해제)
+        cursor.execute("DELETE FROM favorite_places WHERE id = ?", (row["id"],))
+        conn.commit()
         conn.close()
-        return {"success": True, "action": "already_exists", "id": row["id"]}
+        return {"success": True, "action": "removed", "is_favorite": False, "id": row["id"]}
 
     cursor.execute("""
     INSERT INTO favorite_places (user_username, category, name, address, latitude, longitude, phone, status_info, memo, created_at)
@@ -29,7 +33,10 @@ async def add_favorite_place(user_username: str, category: str, name: str, addre
     place_id = cursor.lastrowid
     conn.commit()
     conn.close()
-    return {"success": True, "action": "added", "id": place_id}
+    return {"success": True, "action": "added", "is_favorite": True, "id": place_id}
+
+async def toggle_favorite_place(user_username: str, category: str, name: str, address: str = "", lat: float = None, lon: float = None, phone: str = "", status_info: str = "", memo: str = ""):
+    return await add_favorite_place(user_username, category, name, address, lat, lon, phone, status_info, memo)
 
 async def get_favorite_places(user_username: str = None):
     conn = get_db_connection()

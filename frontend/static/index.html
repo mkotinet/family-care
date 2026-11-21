@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>우리가족챙기기 - 데일리 라이프 비서</title>
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/static/style.css?v=1.3.1">
+  <link rel="manifest" href="/manifest.json?v=1.3.1">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="/static/icons/icon-512.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png">
@@ -14,7 +14,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="우리가족챙기기">
-  <meta name="app-version" content="1.3.0">
+  <meta name="app-version" content="1.3.1">
 
   <!-- Leaflet 오픈스트리트맵 엔진 (카카오맵 인증/로딩 실패 시 즉시 자동 폴백) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -22,6 +22,21 @@
 </head>
 <body>
   <div class="app-container">
+
+    <!-- 0. PWA 홈 화면 바로가기 / 앱 설치 상단 배너 (안드로이드/모바일 완벽 지원) -->
+    <div id="pwaInstallBanner" class="pwa-install-banner" style="display: none;">
+      <div class="pwa-banner-content">
+        <span class="pwa-banner-icon">📲</span>
+        <div>
+          <div class="pwa-banner-title">홈 화면에 바로가기 앱 추가하기</div>
+          <div class="pwa-banner-sub">한 번 터치로 언제든 편리하게 접속하세요</div>
+        </div>
+      </div>
+      <div class="pwa-banner-actions">
+        <button class="btn-pwa-banner-install" onclick="triggerPwaInstall()">앱 설치</button>
+        <button class="btn-pwa-banner-close" onclick="dismissPwaBanner()" title="배너 닫기">✕</button>
+      </div>
+    </div>
     
     <!-- 1. 앱 헤더 (로그인 유저 프로필 & 안심위치/채팅 액션바) -->
     <header class="app-header">
@@ -268,6 +283,33 @@
         </div>
         <div id="kakaoCategoryMap" style="width: 100%; height: 260px; border-radius: 14px; position: relative; z-index: 1;"></div>
         <div class="map-helper-text" id="mapHelperText">📍 지도의 마커를 터치하여 위치를 확인하고 즐겨찾기에 등록하세요.</div>
+
+        <!-- 지도 선택 장소 / 버스정류소 인터랙티브 카드 -->
+        <div id="mapSelectedPlaceCard" class="map-selected-card" style="display: none;">
+          <div class="selected-card-header">
+            <div>
+              <span class="selected-badge" id="selPlaceCatBadge">장소</span>
+              <span class="selected-title" id="selPlaceName">장소명</span>
+            </div>
+            <button class="btn-pwa-banner-close" style="color: #64748b;" onclick="closeSelectedPlaceCard()">✕</button>
+          </div>
+          <div class="selected-address" id="selPlaceAddress">주소</div>
+          <div class="selected-phone" id="selPlacePhone"></div>
+          
+          <!-- 버스 정류소 도착 정보 또는 추가 상태 박스 -->
+          <div class="selected-extra-box" id="selPlaceExtraBox" style="display: none;">
+            <!-- 동적 주입 -->
+          </div>
+
+          <div class="selected-card-actions">
+            <button class="btn-card-toggle-fav" id="btnToggleSelectedFav" onclick="toggleSelectedPlaceFavorite()">
+              <span id="selFavStar">⭐</span> <span id="selFavText">즐겨찾기 등록</span>
+            </button>
+            <button class="btn-card-nav" id="btnSelectedNav" onclick="navigateSelectedPlace()">
+              🧭 카카오맵 길찾기
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- 상세 콘텐츠 목록 뷰 -->
@@ -307,6 +349,36 @@
       <!-- 아이들 위치 카드 목록 -->
       <div class="safety-children-cards" id="safetyChildrenList">
         <!-- 동적 주입 -->
+      </div>
+
+      <!-- 🧪 GPS 및 로그인 세션 실측 검증 시뮬레이션 패널 (부모 검증용) -->
+      <div class="safety-test-panel">
+        <div class="safety-test-header" onclick="toggleSafetyTestPanel()">
+          <span>🧪 <strong>실측 검증 시뮬레이터</strong> (자녀 이동/GPS 연동 테스트)</span>
+          <span id="testPanelArrow">▼</span>
+        </div>
+        <div class="safety-test-content" id="safetyTestPanelBody" style="display: none;">
+          <div style="font-size: 11px; color: #64748b; margin-bottom: 4px;">
+            자녀가 아직 앱 미설치 상태이거나 외출 중일 때, 위치 수신 로직을 즉시 실측 검증할 수 있습니다.
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            <button type="button" class="preset-chip" onclick="simulateChildLocation('도비사랑녀', '평내호평역 학원가', 37.653412, 127.244123, false)">
+              🎒 첫째: 호평역 학원가 (외출)
+            </button>
+            <button type="button" class="preset-chip" onclick="simulateChildLocation('도비사랑녀', '평내초등학교', 37.646123, 127.234512, false)">
+              🏫 첫째: 평내초교
+            </button>
+            <button type="button" class="preset-chip" onclick="simulateChildLocation('도비사랑녀', '집 (평내유진마젤란)', 37.6434558, 127.2311716, false)">
+              🏡 첫째: 집 복귀
+            </button>
+            <button type="button" class="preset-chip" onclick="simulateChildLocation('미니미니채', '평내도서관', 37.641203, 127.228945, false)">
+              📖 둘째: 평내도서관
+            </button>
+            <button type="button" class="preset-chip" onclick="simulateChildLocation('미니미니채', '집 (평내유진마젤란)', 37.6434558, 127.2311716, false)">
+              🏡 둘째: 집
+            </button>
+          </div>
+        </div>
       </div>
 
       <div style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
@@ -537,6 +609,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=1.3.1"></script>
 </body>
 </html>

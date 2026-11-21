@@ -1253,3 +1253,238 @@ body {
   color: white;
   border-color: #0ea5e9;
 }
+
+/* PWA 홈화면 바로가기 상단 배너 */
+.pwa-install-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: white;
+  padding: 10px 14px;
+  border-radius: 14px;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.25);
+  animation: slideDown 0.3s ease-out;
+}
+
+.pwa-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pwa-banner-icon {
+  font-size: 24px;
+}
+
+.pwa-banner-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+
+.pwa-banner-sub {
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.pwa-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-pwa-banner-install {
+  background: white;
+  color: #0369a1;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+  transition: transform 0.1s;
+}
+
+.btn-pwa-banner-install:active {
+  transform: scale(0.96);
+}
+
+.btn-pwa-banner-close {
+  background: transparent;
+  color: white;
+  border: none;
+  font-size: 16px;
+  padding: 4px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+/* 지도 선택 장소 / 버스정류소 인터랙티브 카드 */
+.map-selected-card {
+  background: white;
+  border: 1.5px solid #0284c7;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-top: 10px;
+  box-shadow: 0 4px 16px rgba(2, 132, 199, 0.15);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.selected-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 6px;
+}
+
+.selected-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  margin-right: 6px;
+}
+
+.selected-badge.restaurant { background: #ffedd5; color: #c2410c; }
+.selected-badge.hospital { background: #dbeafe; color: #1d4ed8; }
+.selected-badge.pharmacy { background: #dcfce7; color: #15803d; }
+.selected-badge.transit { background: #e0f2fe; color: #0369a1; }
+
+.selected-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.selected-address {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.selected-phone {
+  font-size: 11px;
+  color: #0284c7;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.selected-extra-box {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 11px;
+}
+
+.selected-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-card-toggle-fav {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  border: 1px solid #10b981;
+  background: #ecfdf5;
+  color: #047857;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.15s;
+}
+
+.btn-card-toggle-fav.is-favorite {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.btn-card-nav {
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid #cbd5e1;
+  background: white;
+  color: #334155;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 정류소 실시간 도착 버스 목록 */
+.station-arrival-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+
+.station-arrival-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.bus-num-pill {
+  font-weight: 800;
+  color: white;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+/* GPS 실측 검증 시뮬레이션 패널 */
+.safety-test-panel {
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-top: 12px;
+}
+
+.safety-test-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #475569;
+  cursor: pointer;
+}
+
+.safety-test-content {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+

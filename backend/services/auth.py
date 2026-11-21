@@ -96,6 +96,22 @@ async def get_user_by_token(token: str):
     conn.close()
     return None
 
+async def touch_user_heartbeat(token: str, device_info: str = None):
+    """클라이언트 앱 실행 중 세션 유지 하트비트 갱신"""
+    if not token:
+        return False
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now_kst = datetime.now(KST).isoformat()
+    if device_info:
+        cursor.execute("UPDATE user_tokens SET last_used_at = ?, device_info = ? WHERE token = ?", (now_kst, device_info, token))
+    else:
+        cursor.execute("UPDATE user_tokens SET last_used_at = ? WHERE token = ?", (now_kst, token))
+    success = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return success
+
 async def get_family_members_list():
     conn = get_db_connection()
     cursor = conn.cursor()

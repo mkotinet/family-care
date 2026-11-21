@@ -1,16 +1,48 @@
 {
-  "name": "우리가족챙기기",
-  "short_name": "가족챙기기",
-  "description": "우리 가족 데일리 라이프 & 건강·생활 비서",
-  "start_url": "/",
+  "id": "https://family.danminlove.com",
+  "name": "우리가족챙기기 - 우리 가족 데일리 라이프 비서",
+  "short_name": "우리가족챙기기",
+  "description": "우리 가족 동선(날씨, 옷차림, 실시간 버스/지하철, 단골식당, 약국, 병원, 아이 안심 위치 & 가족톡) 올인원 비서",
+  "start_url": "/?pwa=1",
+  "scope": "/",
   "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "portrait",
   "background_color": "#f8fafc",
   "theme_color": "#0ea5e9",
+  "categories": [
+    "lifestyle",
+    "productivity",
+    "utilities"
+  ],
   "icons": [
     {
-      "src": "/static/icon.png",
+      "src": "/static/icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/static/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

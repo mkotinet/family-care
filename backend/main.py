@@ -4,13 +4,13 @@ from pathlib import Path
 from datetime import datetime
 import zoneinfo
 from fastapi import FastAPI, Request, Query, Body, Header, Response
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import DEFAULT_LOCATION, APP_TITLE, APP_SUBTITLE, TIMEZONE, PORT, KAKAO_JS_API_KEY, KAKAO_REST_API_KEY
 from backend.database import init_db
-from backend.services.auth import authenticate_user, get_user_by_token, get_family_members_list
+from backend.services.auth import authenticate_user, get_user_by_token, get_family_members_list, touch_user_heartbeat
 from backend.services.location import update_user_location, get_family_locations, request_child_ping
 from backend.services.chat import get_chat_rooms, get_messages, send_message
 from backend.services.places import add_favorite_place, get_favorite_places, remove_favorite_place
@@ -42,13 +42,53 @@ STATIC_DIR = BASE_DIR / "frontend" / "static"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def serve_index():
     index_file = STATIC_DIR / "index.html"
     if index_file.exists():
         with open(index_file, "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
     return HTMLResponse("<h3>우리가족챙기기 웹앱 초기화 중입니다...</h3>")
+
+@app.api_route("/manifest.json", methods=["GET", "HEAD"])
+async def serve_manifest():
+    """PWA 표준 Web App Manifest 서빙 (안드로이드/데스크톱 A2HS 설치 보장)"""
+    file_path = STATIC_DIR / "manifest.json"
+    if file_path.exists():
+        return FileResponse(file_path, media_type="application/manifest+json")
+    return JSONResponse(status_code=404, content={"error": "manifest not found"})
+
+@app.api_route("/sw.js", methods=["GET", "HEAD"])
+async def serve_sw():
+    """PWA 루트 서비스 워커 서빙 (Service-Worker-Allowed: /)"""
+    file_path = STATIC_DIR / "sw.js"
+    if file_path.exists():
+        response = FileResponse(file_path, media_type="application/javascript")
+        response.headers["Service-Worker-Allowed"] = "/"
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+    return Response(status_code=404, content="sw not found")
+
+@app.api_route("/favicon.ico", methods=["GET", "HEAD"])
+async def serve_favicon():
+    file_path = STATIC_DIR / "icons" / "icon-192.png"
+    if file_path.exists():
+        return FileResponse(file_path, media_type="image/png")
+    return Response(status_code=204)
+
+@app.post("/api/auth/heartbeat")
+async def api_auth_heartbeat(payload: dict = Body(None), authorization: str = Header(None)):
+    """클라이언트 화면 실행 중 실시간 접속 세션 유지 하트비트"""
+    token = (authorization or "").replace("Bearer ", "").strip()
+    if not token and payload:
+        token = payload.get("token", "")
+    device_info = payload.get("device_info") if payload else None
+    success = await touch_user_heartbeat(token, device_info)
+    return {
+        "success": success,
+        "is_online": True,
+        "time": datetime.now(KST).isoformat()
+    }
 
 @app.get("/api/healthz")
 async def health_check():

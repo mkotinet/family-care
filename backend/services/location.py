@@ -86,7 +86,7 @@ async def update_user_location(username: str, lat: float, lon: float, accuracy: 
 
 async def get_family_locations():
     """
-    가족 4인 전체 위치 상태 조회 (실제 수신 여부, 경과 시간, 안심존 상태 정밀 산출)
+    가족 4인 전체 위치 및 실시간 로그인 접속 상태 모니터링 (실제 수신 여부, 경과 시간, 안심존 상태 정밀 산출)
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -94,9 +94,15 @@ async def get_family_locations():
     SELECT 
         u.username, u.name, u.role_title, u.role_type, u.avatar, u.avatar_color,
         l.latitude, l.longitude, l.accuracy, l.address, l.landmark, l.battery_level, 
-        l.is_moving, l.is_manual, l.updated_at
+        l.is_moving, l.is_manual, l.updated_at,
+        t.token, t.device_info, t.last_used_at AS token_last_used_at
     FROM users u
     LEFT JOIN user_locations l ON u.username = l.username
+    LEFT JOIN (
+        SELECT username, token, device_info, last_used_at,
+               ROW_NUMBER() OVER(PARTITION BY username ORDER BY last_used_at DESC) as rn
+        FROM user_tokens
+    ) t ON u.username = t.username AND t.rn = 1
     ORDER BY u.id ASC
     """)
     rows = cursor.fetchall()
@@ -107,14 +113,55 @@ async def get_family_locations():
     parents = []
 
     for r in rows:
+        # 1. 로그인 및 세션 실시간 모니터링 판별
+        token_last = r["token_last_used_at"]
+        is_online = False
+        login_status = "NEVER_LOGGED_IN"
+        login_badge = "⚪ 앱 미설치 / 미로그인"
+        login_desc = "로그인 기록 없음"
+
+        if token_last:
+            try:
+                if "T" in token_last:
+                    tok_dt = datetime.fromisoformat(token_last)
+                else:
+                    tok_dt = datetime.strptime(token_last, "%Y-%m-%d %H:%M:%S").replace(tzinfo=KST)
+                
+                tok_diff = (now_dt - tok_dt).total_seconds()
+                if tok_diff < 300: # 5분 이내
+                    is_online = True
+                    login_status = "ONLINE"
+                    login_badge = "🟢 실시간 접속 중"
+                    login_desc = "방금 전 활동"
+                elif tok_diff < 3600:
+                    login_status = "RECENT"
+                    login_badge = "🟡 최근 접속"
+                    login_desc = f"{int(tok_diff // 60)}분 전 활동"
+                elif tok_diff < 86400:
+                    login_status = "OFFLINE"
+                    login_badge = "⚪ 오프라인"
+                    login_desc = f"{int(tok_diff // 3600)}시간 전 접속"
+                else:
+                    login_status = "OFFLINE"
+                    login_badge = "⚪ 오프라인"
+                    login_desc = tok_dt.strftime("%m월 %d일 접속")
+            except Exception:
+                login_desc = token_last
+
+        # 2. 위치 및 GPS 판별
         has_location = bool(r["updated_at"] and r["latitude"] is not None and r["longitude"] is not None)
         status_badge = "⚪ 앱 미설치 / 수신 대기"
         time_diff_desc = "미수신"
         is_fresh = False
+        is_manual = bool(r["is_manual"]) if has_location else False
 
         if has_location:
             try:
-                up_dt = datetime.strptime(r["updated_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=KST)
+                up_str = r["updated_at"]
+                if "T" in up_str:
+                    up_dt = datetime.fromisoformat(up_str)
+                else:
+                    up_dt = datetime.strptime(up_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=KST)
                 diff_sec = (now_dt - up_dt).total_seconds()
                 if diff_sec < 60:
                     time_diff_desc = "방금 전"
@@ -123,18 +170,28 @@ async def get_family_locations():
                 elif diff_sec < 86400:
                     time_diff_desc = f"{int(diff_sec // 3600)}시간 전"
                 else:
-                    time_diff_desc = up_dt.strftime("%m월%d일 %H:%M")
+                    time_diff_desc = up_dt.strftime("%m월 %d일 %H:%M")
 
                 is_fresh = (diff_sec < 1800) # 30분 이내
 
-                landmark_text = r["landmark"] or ""
-                if "안심구역" in landmark_text or "집" in landmark_text:
-                    status_badge = "🟢 안심 구역" if is_fresh else "🟠 안심 구역 (확인 지연)"
+                if is_manual:
+                    status_badge = f"📌 부모 수동지정 ({r['landmark'] or '장소 지정'})"
                 else:
-                    status_badge = "🟡 외출/이동 중" if is_fresh else "🟠 외출 중 (확인 지연)"
+                    landmark_text = r["landmark"] or ""
+                    if "안심구역" in landmark_text or "집" in landmark_text:
+                        status_badge = "🟢 안심 구역 (실시간 GPS)" if is_fresh else "🟠 안심 구역 (GPS 확인 지연)"
+                    else:
+                        status_badge = "🟡 외출/이동 중 (실시간 GPS)" if is_fresh else "🟠 외출 중 (GPS 확인 지연)"
 
             except Exception:
                 time_diff_desc = r["updated_at"]
+        else:
+            if is_online:
+                status_badge = "🟢 실시간 접속 중 (GPS 수신 대기)"
+            elif login_status == "RECENT":
+                status_badge = f"🟡 최근 접속 ({login_desc}) / 위치 미수신"
+            else:
+                status_badge = "⚪ 미로그인 / 위치 미수신"
 
         item = {
             "username": r["username"],
@@ -143,15 +200,20 @@ async def get_family_locations():
             "role_type": r["role_type"],
             "avatar": r["avatar"],
             "avatar_color": r["avatar_color"],
+            "is_online": is_online,
+            "login_status": login_status,
+            "login_badge": login_badge,
+            "login_desc": login_desc,
+            "device_info": r["device_info"] or "기기 정보 없음",
             "has_location": has_location,
             "latitude": r["latitude"] if has_location else None,
             "longitude": r["longitude"] if has_location else None,
             "accuracy": r["accuracy"] if has_location else None,
             "address": r["address"] if has_location else "위치 미수신",
-            "landmark": r["landmark"] if has_location else "자녀 폰에서 앱 실행 시 실시간 위치가 전송됩니다",
+            "landmark": r["landmark"] if has_location else ("앱 실행 중이나 GPS 수신 대기 중입니다" if is_online else "자녀 폰에서 앱 실행 시 실시간 위치가 전송됩니다"),
             "battery_level": r["battery_level"] if has_location else None,
             "is_moving": bool(r["is_moving"]) if has_location else False,
-            "is_manual": bool(r["is_manual"]) if has_location else False,
+            "is_manual": is_manual,
             "updated_at": r["updated_at"] if has_location else "미수신",
             "time_diff_desc": time_diff_desc,
             "status_badge": status_badge,

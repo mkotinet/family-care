@@ -2034,6 +2034,59 @@ function switchChatRoom(roomId) {
   loadChatMessages(roomId);
 }
 
+let lastSeenChatMsgId = 0;
+
+async function requestNotificationPermission() {
+  if (!("Notification" in window)) {
+    showToast("이 브라우저는 웹 알림을 지원하지 않습니다.", "info");
+    return;
+  }
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm === "granted") {
+      showToast("🔔 가족 메시지 알림이 활성화되었습니다!", "success");
+      const btn = document.getElementById("btnRequestNotify");
+      if (btn) {
+        btn.textContent = "🔔 알림 켜짐";
+        btn.style.background = "#dcfce7";
+      }
+      triggerMessageNotification({
+        sender_name: "우리가족챙기기",
+        text: "가족 메시지 및 실시간 위치 알림이 켜졌습니다. ✨"
+      });
+    } else {
+      showToast("알림 권한이 허용되지 않았습니다. 브라우저 설정에서 허용해주세요.", "info");
+    }
+  } catch (err) {
+    console.warn("Notification permission error:", err);
+  }
+}
+
+function triggerMessageNotification(msg) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+  const title = `💬 ${msg.sender_name}님의 새 메시지`;
+  const options = {
+    body: msg.text || "가족 메시지가 도착했습니다.",
+    icon: "/static/icons/icon-192.png",
+    badge: "/static/icons/icon-192.png",
+    vibrate: [200, 100, 200],
+    tag: "family-care-msg-" + Date.now()
+  };
+
+  try {
+    if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+      navigator.serviceWorker.ready.then(reg => {
+        reg.showNotification(title, options);
+      });
+    } else {
+      new Notification(title, options);
+    }
+  } catch (e) {
+    console.warn("Trigger notification error:", e);
+  }
+}
+
 async function loadChatMessages(roomId) {
   try {
     const res = await fetch(`/api/chat/messages?room_id=${roomId}`);
@@ -2041,6 +2094,17 @@ async function loadChatMessages(roomId) {
     const scrollEl = document.getElementById("chatMessagesScroll");
 
     const currentUname = AppState.currentUser ? AppState.currentUser.username : "미니미니";
+
+    // 최신 메시지 감지 및 알림 트리거
+    if (msgs.length > 0) {
+      const latestMsg = msgs[msgs.length - 1];
+      if (lastSeenChatMsgId !== 0 && latestMsg.id > lastSeenChatMsgId && latestMsg.sender_username !== currentUname) {
+        triggerMessageNotification(latestMsg);
+        const unreadDot = document.getElementById("chatUnreadDot");
+        if (unreadDot) unreadDot.style.display = "block";
+      }
+      lastSeenChatMsgId = latestMsg.id;
+    }
 
     scrollEl.innerHTML = msgs.map(m => {
       const isMine = (m.sender_username === currentUname);

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>우리가족챙기기 - 데일리 라이프 비서</title>
   <link rel="stylesheet" href="/static/style.css?v=1.3.1">
-  <link rel="manifest" href="/manifest.json?v=1.3.1">
+  <link rel="manifest" href="/manifest.json">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="/static/icons/icon-512.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png">
@@ -439,7 +439,12 @@
           <span id="chatRoomTitle">👨‍👩‍👧‍👧 우리 가족 전체톡</span>
           <span class="chat-room-badge" id="chatRoomBadge">가족전체</span>
         </div>
-        <button class="sheet-close-btn" onclick="closeChatDrawer()">✕</button>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button class="header-btn" id="btnRequestNotify" onclick="requestNotificationPermission()" title="가족 메시지 실시간 알림 켜기" style="background: #f0fdf4; color: #166534; border: 1px solid #86efac; font-size: 11px; padding: 4px 8px; font-weight: 800;">
+            🔔 알림 켜기
+          </button>
+          <button class="sheet-close-btn" onclick="closeChatDrawer()">✕</button>
+        </div>
       </div>
 
       <!-- 채팅방 탭 선택 바 -->
@@ -588,19 +593,36 @@
 
   <!-- 13. [모달] PWA 홈 화면 앱 설치 안내 모달 -->
   <div class="modal-overlay" id="modalPwaGuide" onclick="closePwaGuideModal(event)">
-    <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 420px;">
+    <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 440px;">
       <div class="modal-header">
-        <div class="modal-title"><span>📲</span> 홈 화면에 앱 설치하기</div>
+        <div class="modal-title"><span>📲</span> 홈 화면에 정식 앱(PWA) 설치하기</div>
         <button class="sheet-close-btn" onclick="closePwaGuideModal()">✕</button>
       </div>
       <div style="padding: 10px 0; font-size: 13px; line-height: 1.6; color: #334155;">
-        <div style="margin-bottom: 12px; padding: 10px 12px; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 10px;">
-          <div style="font-weight: 800; color: #0369a1; margin-bottom: 4px;">🤖 안드로이드 (크롬 / 삼성인터넷)</div>
-          <div>1. 브라우저 주소창 오른쪽의 <b>[설치 📥]</b> 아이콘 터치<br>또는 우측 상단 메뉴(⋮)에서 <b>[홈 화면에 추가]</b> 또는 <b>[앱 설치]</b>를 선택하세요.</div>
+        <div style="margin-bottom: 10px; padding: 10px 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px;">
+          <div style="font-weight: 800; color: #166534; margin-bottom: 4px;">✨ 1. 구글 크롬 (Chrome) - 가장 추천!</div>
+          <div style="font-size: 12px;">1. 상단 주소창 오른쪽의 <b>[설치 📥]</b> 아이콘 터치<br>또는 우측 상단 메뉴(⋮) ➔ <b>[앱 설치]</b> 선택 시 브라우저 주소창 없는 100% 독립 앱으로 설치됩니다.</div>
         </div>
+
+        <div style="margin-bottom: 10px; padding: 10px 12px; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 10px;">
+          <div style="font-weight: 800; color: #0369a1; margin-bottom: 4px;">🤖 2. 삼성인터넷 (갤럭시 브라우저)</div>
+          <div style="font-size: 12px;">
+            1. 우측 하단 메뉴(≡) ➔ <b>[현재 페이지 추가]</b> 터치<br>
+            2. 팝업에서 '홈 화면'이 아닌 <b>👉 [앱 (App)]</b>을 선택해야 브라우저 뱃지 없는 정식 독립 앱으로 설치됩니다!<br>
+            (또는 주소창 오른쪽 다운로드 화살표 📥 터치)
+          </div>
+        </div>
+
+        <div style="margin-bottom: 10px; padding: 10px 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px;">
+          <div style="font-weight: 800; color: #b45309; margin-bottom: 4px;">⚠️ 3. 네이버 웨일 (Whale) 유의사항</div>
+          <div style="font-size: 12px;">
+            네이버 웨일은 브라우저 자체 정책상 정식 앱(WebAPK) 설치 대신 <b>웨일 북마크 바로가기 링크</b>로 저장됩니다. 브라우저 껍데기 없는 독립 앱으로 설치하려면 <b>크롬</b> 또는 <b>삼성인터넷</b>을 사용하세요!
+          </div>
+        </div>
+
         <div style="padding: 10px 12px; background: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 10px;">
-          <div style="font-weight: 800; color: #be185d; margin-bottom: 4px;">🍎 아이폰 / 아이패드 (사파리 Safari)</div>
-          <div>1. 하단 중앙의 <b>공유 버튼 (⎋ 네모에 화살표)</b> 터치<br>2. 메뉴를 아래로 내려 <b>[홈 화면에 추가 ➕]</b>를 선택하세요.</div>
+          <div style="font-weight: 800; color: #be185d; margin-bottom: 4px;">🍎 4. 아이폰 / 아이패드 (사파리 Safari)</div>
+          <div style="font-size: 12px;">하단 중앙의 <b>공유 버튼 (⎋ 네모에 화살표)</b> 터치 ➔ <b>[홈 화면에 추가 ➕]</b>를 선택하세요.</div>
         </div>
       </div>
       <div style="display: flex; justify-content: flex-end; margin-top: 10px;">

@@ -55,7 +55,9 @@ async def serve_manifest():
     """PWA 표준 Web App Manifest 서빙 (안드로이드/데스크톱 A2HS 설치 보장)"""
     file_path = STATIC_DIR / "manifest.json"
     if file_path.exists():
-        return FileResponse(file_path, media_type="application/manifest+json")
+        response = FileResponse(file_path, media_type="application/manifest+json")
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
     return JSONResponse(status_code=404, content={"error": "manifest not found"})
 
 @app.api_route("/sw.js", methods=["GET", "HEAD"])

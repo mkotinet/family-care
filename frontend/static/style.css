@@ -613,10 +613,13 @@ body {
 .detail-sheet {
   width: 100%;
   max-width: 520px;
-  max-height: 85vh;
+  max-height: 92vh;
+  max-height: 92dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: #ffffff;
   border-radius: 24px 24px 0 0;
-  padding: 16px 20px 32px;
+  padding: 16px 20px calc(24px + env(safe-area-inset-bottom, 16px));
   box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
@@ -805,10 +808,16 @@ body {
 .modal-content {
   width: 100%;
   max-width: 440px;
+  max-height: 90vh;
+  max-height: 90dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: white;
   border-radius: 20px;
   padding: 20px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom, 12px));
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  margin: auto 12px;
 }
 
 .modal-header {
@@ -1331,6 +1340,106 @@ body {
   margin-top: 10px;
   box-shadow: 0 4px 16px rgba(2, 132, 199, 0.15);
   animation: fadeIn 0.2s ease-out;
+  max-height: 48vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 집 ➔ 목적지 거리 & 예상 소요 시간 뱃지 바 */
+.place-distance-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+
+.place-distance-bar .dist-pill {
+  color: #166534;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.place-distance-bar .time-pill {
+  background: white;
+  border: 1px solid #bbf7d0;
+  padding: 2px 7px;
+  border-radius: 6px;
+  color: #15803d;
+  font-weight: 700;
+  font-size: 10.5px;
+}
+
+/* 버스 2단계 루트 빌더 박스 (출발지 ➔ 도착지) */
+.transit-route-box {
+  background: #f0f9ff;
+  border: 1.5px solid #38bdf8;
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 8px;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.08);
+}
+
+.transit-route-step-header {
+  font-size: 12px;
+  font-weight: 800;
+  color: #0369a1;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.transit-route-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.transit-route-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #0f172a;
+}
+
+.transit-route-node .node-badge {
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.transit-route-node.origin .node-badge {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.transit-route-node.dest .node-badge {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.transit-route-distance-info {
+  font-size: 11px;
+  color: #475569;
+  background: white;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #bae6fd;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .selected-card-header {

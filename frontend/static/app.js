@@ -25,7 +25,7 @@ window.addEventListener("appinstalled", () => {
 
 // 전역 상태
 const AppState = {
-  APP_VERSION: document.querySelector('meta[name="app-version"]')?.getAttribute('content') || '1.3.1',
+  APP_VERSION: document.querySelector('meta[name="app-version"]')?.getAttribute('content') || '1.3.3',
   versionMeta: null,
   isCheckingVersion: false,
   lastVersionCheckTime: 0,
@@ -56,7 +56,14 @@ const AppState = {
   cachedTransitRoutes: [],
   favoritePlaces: [],
   selectedPlace: null,
-  safetyPollingTimer: null
+  safetyPollingTimer: null,
+  categoryRouteLine: null,      // 집 ➔ 목적지 (식당/병원/약국) 경로선
+  transitRouteLine: null,       // 버스 출발지 ➔ 도착지 경로선
+  transitOriginMarker: null,    // 버스 출발지 깃발 마커
+  transitRouteBuilder: {
+    origin: null,               // { name, lat, lon, address }
+    destination: null           // { name, lat, lon, address }
+  }
 };
 
 // ==========================================
@@ -1100,21 +1107,251 @@ function renderKakaoCategoryMarkers() {
 }
 
 // ==========================================
+// 거리 계산, 경로선(Polyline) 및 2단계 버스 루트 빌더 헬퍼
+// ==========================================
+function calcDistanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371.0;
+  const dLat = (lat2 - lat1) * Math.PI / 180.0;
+  const dLon = (lon2 - lon1) * Math.PI / 180.0;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180.0) * Math.cos(lat2 * Math.PI / 180.0) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c * 100) / 100;
+}
+
+function getDistanceFromHome(targetLat, targetLon) {
+  const homeLat = AppState.location.lat;
+  const homeLon = AppState.location.lon;
+  const dKm = calcDistanceKm(homeLat, homeLon, targetLat, targetLon);
+  const dText = dKm < 1 ? `${Math.round(dKm * 1000)}m` : `${dKm.toFixed(1)}km`;
+  const walkMin = Math.max(1, Math.round((dKm / 4.0) * 60)); // 시속 4km 도보 기준
+  const carMin = Math.max(1, Math.round((dKm / 25.0) * 60)); // 시속 25km 시내 차량 기준
+  return { dKm, dText, walkMin, carMin };
+}
+
+// 집(평내유진마젤란) ➔ 식당/약국/병원 경로선 긋기
+function drawRouteFromHome(destLat, destLon, title = "") {
+  clearCategoryRouteLine();
+  const homeLat = AppState.location.lat;
+  const homeLon = AppState.location.lon;
+
+  if (AppState.mapEngine === "kakao" && AppState.kakaoCategoryMap) {
+    const linePath = [
+      new kakao.maps.LatLng(homeLat, homeLon),
+      new kakao.maps.LatLng(destLat, destLon)
+    ];
+    AppState.categoryRouteLine = new kakao.maps.Polyline({
+      map: AppState.kakaoCategoryMap,
+      path: linePath,
+      strokeWeight: 4,
+      strokeColor: '#0ea5e9',
+      strokeOpacity: 0.85,
+      strokeStyle: 'dash'
+    });
+
+    const bounds = new kakao.maps.LatLngBounds();
+    bounds.extend(linePath[0]);
+    bounds.extend(linePath[1]);
+    AppState.kakaoCategoryMap.setBounds(bounds);
+  } else if (AppState.leafletCategoryMap) {
+    AppState.categoryRouteLine = L.polyline(
+      [[homeLat, homeLon], [destLat, destLon]],
+      { color: '#0ea5e9', weight: 4, dashArray: '6, 8', opacity: 0.85 }
+    ).addTo(AppState.leafletCategoryMap);
+    AppState.leafletCategoryMap.fitBounds(AppState.categoryRouteLine.getBounds(), { padding: [35, 35] });
+  }
+}
+
+function clearCategoryRouteLine() {
+  if (AppState.categoryRouteLine) {
+    if (AppState.mapEngine === "kakao" && AppState.categoryRouteLine.setMap) {
+      AppState.categoryRouteLine.setMap(null);
+    } else if (AppState.categoryRouteLine.remove) {
+      AppState.categoryRouteLine.remove();
+    }
+    AppState.categoryRouteLine = null;
+  }
+}
+
+// ==========================================
+// 🚌 2단계 버스 루트 빌더 (출발지 ➔ 도착지)
+// ==========================================
+function resetTransitRouteBuilder() {
+  AppState.transitRouteBuilder = { origin: null, destination: null };
+  clearTransitRouteLine();
+  if (AppState.transitOriginMarker) {
+    if (AppState.mapEngine === "kakao" && AppState.transitOriginMarker.setMap) {
+      AppState.transitOriginMarker.setMap(null);
+    } else if (AppState.transitOriginMarker.remove) {
+      AppState.transitOriginMarker.remove();
+    }
+    AppState.transitOriginMarker = null;
+  }
+  updateMapHelperText();
+  showToast("🔄 버스 루트 선택이 초기화되었습니다. 지도에서 출발지를 선택해주세요.", "info");
+}
+
+function clearTransitRouteLine() {
+  if (AppState.transitRouteLine) {
+    if (AppState.mapEngine === "kakao" && AppState.transitRouteLine.setMap) {
+      AppState.transitRouteLine.setMap(null);
+    } else if (AppState.transitRouteLine.remove) {
+      AppState.transitRouteLine.remove();
+    }
+    AppState.transitRouteLine = null;
+  }
+}
+
+function setTransitOrigin(place) {
+  AppState.transitRouteBuilder.origin = place;
+  AppState.transitRouteBuilder.destination = null;
+  clearTransitRouteLine();
+
+  if (AppState.mapEngine === "kakao" && AppState.kakaoCategoryMap) {
+    if (AppState.transitOriginMarker && AppState.transitOriginMarker.setMap) {
+      AppState.transitOriginMarker.setMap(null);
+    }
+    const overlay = new kakao.maps.CustomOverlay({
+      position: new kakao.maps.LatLng(place.lat, place.lon),
+      content: `<div style="background:#ef4444;color:white;padding:4px 8px;border-radius:10px;font-size:11px;font-weight:800;box-shadow:0 3px 8px rgba(0,0,0,0.3);border:2px solid #ffffff;white-space:nowrap;">🚩 출발: ${place.name}</div>`,
+      yAnchor: 2.2
+    });
+    overlay.setMap(AppState.kakaoCategoryMap);
+    AppState.transitOriginMarker = overlay;
+    AppState.kakaoCategoryMap.panTo(new kakao.maps.LatLng(place.lat, place.lon));
+  } else if (AppState.leafletCategoryMap) {
+    if (AppState.transitOriginMarker && AppState.transitOriginMarker.remove) {
+      AppState.transitOriginMarker.remove();
+    }
+    const icon = L.divIcon({
+      className: 'origin-marker-pin',
+      html: `<div style="background:#ef4444;color:white;padding:4px 8px;border-radius:10px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 3px 8px rgba(0,0,0,0.3);border:2px solid #ffffff;">🚩 출발: ${place.name}</div>`,
+      iconSize: [95, 26],
+      iconAnchor: [47, 13]
+    });
+    AppState.transitOriginMarker = L.marker([place.lat, place.lon], { icon }).addTo(AppState.leafletCategoryMap);
+    AppState.leafletCategoryMap.panTo([place.lat, place.lon]);
+  }
+
+  updateMapHelperText();
+  showToast(`🚩 출발지가 '${place.name}'(으)로 설정되었습니다! 이제 지도에서 도착지 정류소/위치를 터치해주세요.`, "info");
+  closeSelectedPlaceCard();
+}
+
+function setTransitDestination(place) {
+  if (!AppState.transitRouteBuilder.origin) {
+    setTransitOrigin(place);
+    return;
+  }
+
+  const origin = AppState.transitRouteBuilder.origin;
+  const dest = place;
+  AppState.transitRouteBuilder.destination = dest;
+
+  const dKm = calcDistanceKm(origin.lat, origin.lon, dest.lat, dest.lon);
+  const dText = dKm < 1 ? `${Math.round(dKm * 1000)}m` : `${dKm.toFixed(1)}km`;
+  const estMin = Math.max(2, Math.round((dKm / 20.0) * 60)); // 시내버스 평균 시속 20km
+
+  clearTransitRouteLine();
+  if (AppState.mapEngine === "kakao" && AppState.kakaoCategoryMap) {
+    const linePath = [
+      new kakao.maps.LatLng(origin.lat, origin.lon),
+      new kakao.maps.LatLng(dest.lat, dest.lon)
+    ];
+    AppState.transitRouteLine = new kakao.maps.Polyline({
+      map: AppState.kakaoCategoryMap,
+      path: linePath,
+      strokeWeight: 5,
+      strokeColor: '#0284c7',
+      strokeOpacity: 0.9,
+      strokeStyle: 'solid'
+    });
+    const bounds = new kakao.maps.LatLngBounds();
+    bounds.extend(linePath[0]);
+    bounds.extend(linePath[1]);
+    AppState.kakaoCategoryMap.setBounds(bounds);
+  } else if (AppState.leafletCategoryMap) {
+    AppState.transitRouteLine = L.polyline(
+      [[origin.lat, origin.lon], [dest.lat, dest.lon]],
+      { color: '#0284c7', weight: 5, opacity: 0.9 }
+    ).addTo(AppState.leafletCategoryMap);
+    AppState.leafletCategoryMap.fitBounds(AppState.transitRouteLine.getBounds(), { padding: [40, 40] });
+  }
+
+  updateMapHelperText();
+
+  openSelectedPlaceCard({
+    category: "교통",
+    categoryTitle: "🚌 나만의 버스 루트 완성",
+    categoryClass: "transit",
+    name: `${origin.name} ➔ ${dest.name}`,
+    address: `출발: ${origin.address || origin.name} / 도착: ${dest.address || dest.name}`,
+    phone: "",
+    status_info: `이동 거리: 약 ${dText} · 소요 예상: 약 ${estMin}분`,
+    lat: dest.lat,
+    lon: dest.lon,
+    extraHtml: `
+      <div class="transit-route-box">
+        <div class="transit-route-step-header">
+          <span>🏁 버스 이동 루트 (출발 ➔ 도착)</span>
+          <button type="button" style="font-size:11px; color:#ef4444; border:none; background:none; cursor:pointer; font-weight:700;" onclick="resetTransitRouteBuilder()">🔄 다시 선택</button>
+        </div>
+        <div class="transit-route-nodes">
+          <div class="transit-route-node origin">
+            <span class="node-badge">출발</span>
+            <b>${origin.name}</b>
+          </div>
+          <div style="font-size: 11px; color: #0284c7; padding-left: 12px; font-weight:700;">⬇️ 약 ${dText} (소요 예상: 약 ${estMin}분)</div>
+          <div class="transit-route-node dest">
+            <span class="node-badge">도착</span>
+            <b>${dest.name}</b>
+          </div>
+        </div>
+        <div style="display: flex; gap: 6px; margin-top: 8px;">
+          <button class="btn-primary" style="flex: 2; padding: 10px 8px; font-size: 12px;" onclick="openRouteModal('${origin.name}', '', '${dest.name}', '${origin.name} ➔ ${dest.name}')">
+            ⭐ 이 버스 루트 즐겨찾기 등록
+          </button>
+          <button class="btn-secondary" style="flex: 1; padding: 10px 8px; font-size: 12px;" onclick="resetTransitRouteBuilder()">
+            취소
+          </button>
+        </div>
+      </div>
+    `
+  });
+}
+
+// ==========================================
 // 지도 안내 및 지도 핀 직접 꽂기 / 목록 연동 헬퍼
 // ==========================================
 function updateMapHelperText() {
   const el = document.getElementById("mapHelperText");
   if (!el) return;
   if (AppState.currentCategory === "transit") {
-    el.innerHTML = "💡 <b>지도 위 원하는 위치를 터치</b>하면 핀이 꽂히며 <b>나만의 버스 루트</b>를 만들 수 있습니다! 🚏";
+    if (!AppState.transitRouteBuilder.origin) {
+      el.innerHTML = "💡 지도에서 정류소(🚏)나 위치를 터치하여 <b>출발지</b>를 선택하세요.";
+    } else if (!AppState.transitRouteBuilder.destination) {
+      el.innerHTML = `🚩 출발: <b>${AppState.transitRouteBuilder.origin.name}</b> ➔ 이제 지도에서 <b>도착지</b>를 터치하세요! <button onclick="resetTransitRouteBuilder()" style="border:none;background:#fee2e2;color:#b91c1c;padding:2px 6px;border-radius:6px;font-size:10px;cursor:pointer;margin-left:4px;">취소</button>`;
+    } else {
+      el.innerHTML = `✅ <b>${AppState.transitRouteBuilder.origin.name} ➔ ${AppState.transitRouteBuilder.destination.name}</b> 루트 생성 완료! <button onclick="resetTransitRouteBuilder()" style="border:none;background:#f1f5f9;color:#475569;padding:2px 6px;border-radius:6px;font-size:10px;cursor:pointer;margin-left:4px;">다시 선택</button>`;
+    }
   } else {
-    el.innerHTML = "📍 지도의 마커를 터치하여 위치를 확인하고 즐겨찾기(등록/취소)를 체크하세요.";
+    el.innerHTML = "📍 지도의 마커를 터치하면 <b>우리 집(🏡)에서의 거리와 경로선</b>이 표시되고 즐겨찾기를 체크할 수 있습니다.";
   }
 }
 
 function handleCategoryMapClick(lat, lon) {
   if (AppState.currentCategory === "transit") {
-    dropCustomTransitPin(lat, lon);
+    if (AppState.transitRouteBuilder.origin && !AppState.transitRouteBuilder.destination) {
+      setTransitDestination({
+        name: `지정한 도착 위치 (${lat.toFixed(3)}, ${lon.toFixed(3)})`,
+        lat,
+        lon,
+        address: `남양주시 평내동 (위도 ${lat.toFixed(4)}, 경도 ${lon.toFixed(4)})`
+      });
+    } else {
+      dropCustomTransitPin(lat, lon);
+    }
   }
 }
 
@@ -1162,12 +1399,17 @@ async function dropCustomTransitPin(lat, lon) {
     lat: lat,
     lon: lon,
     extraHtml: `
-      <div style="background: #e0f2fe; border: 1.5px solid #7dd3fc; border-radius: 10px; padding: 10px; margin-top: 4px;">
-        <div style="font-weight: 800; color: #0369a1; margin-bottom: 4px;">📍 지정한 정류장 위치로 나만의 버스 루트 만들기</div>
-        <div style="font-size: 11px; color: #334155; margin-bottom: 8px;">자주 타는 버스 번호와 목적지를 등록하여 첫 화면 즐겨찾기에 추가하세요!</div>
-        <button class="btn-primary" style="width: 100%; padding: 8px 12px; font-size: 12px;" onclick="openRouteModal('${pinTitle}', '', '잠실/강남 방면')">
-          🚌 이 위치로 나만의 버스 루트 만들기
-        </button>
+      <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 10px; padding: 10px; margin-top: 4px;">
+        <div style="font-weight: 800; color: #166534; font-size: 12px; margin-bottom: 4px;">🚩 나만의 버스 루트 만들기 (1단계)</div>
+        <div style="font-size: 11px; color: #334155; margin-bottom: 8px;">이 위치를 출발지로 할까요, 아니면 도착지로 할까요?</div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 11px; background: #0284c7;" onclick='setTransitOrigin({ name: "${pinTitle}", lat: ${lat}, lon: ${lon}, address: "${pinAddress}" })'>
+            🚩 출발지로 설정
+          </button>
+          <button class="btn-secondary" style="flex: 1; padding: 8px; font-size: 11px;" onclick='setTransitOrigin({ name: "평내유진마젤란(우리집)", lat: ${AppState.location.lat}, lon: ${AppState.location.lon}, address: "우리 집" }); setTransitDestination({ name: "${pinTitle}", lat: ${lat}, lon: ${lon}, address: "${pinAddress}" });'>
+            🏁 우리집에서 오는 도착지로 설정
+          </button>
+        </div>
       </div>
     `
   });
@@ -1248,6 +1490,7 @@ function openSelectedPlaceCard(data) {
   const nameEl = document.getElementById("selPlaceName");
   const addrEl = document.getElementById("selPlaceAddress");
   const phoneEl = document.getElementById("selPlacePhone");
+  const distBox = document.getElementById("selPlaceDistanceBox");
   const extraBox = document.getElementById("selPlaceExtraBox");
 
   if (badgeEl) {
@@ -1266,6 +1509,22 @@ function openSelectedPlaceCard(data) {
     }
   }
 
+  // 집 ➔ 목적지 거리 & 도보/차량 예상 시간 표출 및 경로선 긋기 (식당, 병원, 약국)
+  if (distBox) {
+    if (data.lat && data.lon && (data.categoryClass === "restaurant" || data.categoryClass === "hospital" || data.categoryClass === "pharmacy")) {
+      const distInfo = getDistanceFromHome(data.lat, data.lon);
+      distBox.style.display = "flex";
+      distBox.innerHTML = `
+        <span class="dist-pill">🏡 <b>우리 집(평내유진마젤란)</b>에서 <b>${distInfo.dText}</b></span>
+        <span class="time-pill">🚶 도보 약 ${distInfo.walkMin}분</span>
+        <span class="time-pill">🚗 차량 약 ${distInfo.carMin}분</span>
+      `;
+      drawRouteFromHome(data.lat, data.lon, data.name);
+    } else {
+      distBox.style.display = "none";
+    }
+  }
+
   if (extraBox) {
     if (data.extraHtml) {
       extraBox.style.display = "block";
@@ -1277,6 +1536,11 @@ function openSelectedPlaceCard(data) {
 
   updateSelectedFavButtonState(data.name);
   card.style.display = "block";
+
+  // 화면 크기에 따라 하단 버튼이 잘리지 않도록 자동 스크롤
+  setTimeout(() => {
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 100);
 }
 
 function updateSelectedFavButtonState(placeName) {
@@ -1301,6 +1565,7 @@ function closeSelectedPlaceCard() {
   const card = document.getElementById("mapSelectedPlaceCard");
   if (card) card.style.display = "none";
   AppState.selectedPlace = null;
+  clearCategoryRouteLine();
 }
 
 async function toggleSelectedPlaceFavorite() {
@@ -1323,6 +1588,17 @@ async function selectBusStopOnMap(stop) {
   const sLat = stop.lat || (AppState.location.lat + 0.001);
   const sLon = stop.lon || (AppState.location.lon - 0.001);
 
+  // 만약 2단계 루트 빌더에서 출발지가 이미 지정된 상태라면 -> 즉시 도착지로 매핑!
+  if (AppState.transitRouteBuilder.origin && !AppState.transitRouteBuilder.destination) {
+    setTransitDestination({
+      name: stop.name,
+      lat: sLat,
+      lon: sLon,
+      address: `남양주시 평내동 정류소`
+    });
+    return;
+  }
+
   if (AppState.mapEngine === "kakao" && AppState.kakaoCategoryMap) {
     AppState.kakaoCategoryMap.panTo(new kakao.maps.LatLng(sLat, sLon));
   } else if (AppState.leafletCategoryMap) {
@@ -1339,7 +1615,21 @@ async function selectBusStopOnMap(stop) {
     status_info: "실시간 노선 운행 중",
     lat: sLat,
     lon: sLon,
-    extraHtml: `<div style="color: #64748b; padding: 4px;">도착 예정 버스 정보 조회 중... 🚌</div>`
+    extraHtml: `
+      <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 10px; padding: 10px; margin-bottom: 8px;">
+        <div style="font-weight: 800; color: #166534; font-size: 12px; margin-bottom: 4px;">🚩 나만의 버스 루트 만들기 (1단계)</div>
+        <div style="font-size: 11px; color: #334155; margin-bottom: 8px;">이 정류소를 출발지로 할까요, 아니면 도착지로 할까요?</div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 11px; background: #0284c7;" onclick='setTransitOrigin({ name: "${stop.name}", lat: ${sLat}, lon: ${sLon}, address: "남양주시 평내동 정류소" })'>
+            🚩 출발지로 설정
+          </button>
+          <button class="btn-secondary" style="flex: 1; padding: 8px; font-size: 11px;" onclick='setTransitOrigin({ name: "평내유진마젤란(우리집)", lat: ${AppState.location.lat}, lon: ${AppState.location.lon}, address: "우리 집" }); setTransitDestination({ name: "${stop.name}", lat: ${sLat}, lon: ${sLon}, address: "남양주시 평내동 정류소" });'>
+            🏁 우리집에서 오는 도착지로 설정
+          </button>
+        </div>
+      </div>
+      <div style="color: #64748b; padding: 4px;">도착 예정 버스 정보 조회 중... 🚌</div>
+    `
   });
 
   try {
@@ -1347,9 +1637,23 @@ async function selectBusStopOnMap(stop) {
     const data = await res.json();
     const arrivals = data.arrivals || [];
 
-    let extraHtml = "";
+    let extraHtml = `
+      <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 10px; padding: 10px; margin-bottom: 8px;">
+        <div style="font-weight: 800; color: #166534; font-size: 12px; margin-bottom: 4px;">🚩 나만의 버스 루트 만들기 (1단계)</div>
+        <div style="font-size: 11px; color: #334155; margin-bottom: 8px;">이 정류소를 출발지로 할까요, 아니면 도착지로 할까요?</div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 11px; background: #0284c7;" onclick='setTransitOrigin({ name: "${stop.name}", lat: ${sLat}, lon: ${sLon}, address: "남양주시 평내동 정류소" })'>
+            🚩 출발지로 설정
+          </button>
+          <button class="btn-secondary" style="flex: 1; padding: 8px; font-size: 11px;" onclick='setTransitOrigin({ name: "평내유진마젤란(우리집)", lat: ${AppState.location.lat}, lon: ${AppState.location.lon}, address: "우리 집" }); setTransitDestination({ name: "${stop.name}", lat: ${sLat}, lon: ${sLon}, address: "남양주시 평내동 정류소" });'>
+            🏁 우리집에서 오는 도착지로 설정
+          </button>
+        </div>
+      </div>
+    `;
+
     if (arrivals.length > 0) {
-      extraHtml = `
+      extraHtml += `
         <div style="font-weight: 800; color: #0369a1; margin-bottom: 6px;">🚌 실시간 도착 예정 버스 (${arrivals.length}대)</div>
         <div class="station-arrival-list">
           ${arrivals.map(a => `
@@ -1365,20 +1669,10 @@ async function selectBusStopOnMap(stop) {
             </div>
           `).join("")}
         </div>
-        <div style="margin-top: 10px;">
-          <button class="btn-primary" style="width: 100%; padding: 8px 12px; font-size: 12px;" onclick="openRouteModal('${stop.name}', '', '잠실/강남 방면')">
-            🚌 '${stop.name}'(으)로 나만의 버스 루트 만들기
-          </button>
-        </div>
       `;
     } else {
-      extraHtml = `
+      extraHtml += `
         <div style="color: #64748b; font-size: 11px;">현재 운행 중인 도착 예정 버스가 없습니다.</div>
-        <div style="margin-top: 8px;">
-          <button class="btn-primary" style="width: 100%; padding: 8px 12px; font-size: 12px;" onclick="openRouteModal('${stop.name}', '', '잠실/강남 방면')">
-            🚌 '${stop.name}'(으)로 나만의 버스 루트 만들기
-          </button>
-        </div>
       `;
     }
 
@@ -2458,21 +2752,28 @@ async function submitFamilyLogin() {
 // ==========================================
 // 8. 교통 루트 지도 추가 모달
 // ==========================================
-function openRouteModal(defaultStationName = "", defaultRouteNo = "", defaultDest = "") {
+function openRouteModal(defaultStationName = "", defaultRouteNo = "", defaultDest = "", defaultTitle = "") {
   document.getElementById("modalAddRoute").className = "modal-overlay active";
-  if (defaultStationName) {
-    const stInput = document.getElementById("inputStationName");
-    const titleInput = document.getElementById("inputRouteTitle");
-    if (stInput) stInput.value = defaultStationName;
-    if (titleInput) titleInput.value = `${defaultStationName} 출발`;
+  const stInput = document.getElementById("inputStationName");
+  const titleInput = document.getElementById("inputRouteTitle");
+  const routeInput = document.getElementById("inputRouteNo");
+  const destInput = document.getElementById("inputDestination");
+
+  if (defaultStationName && stInput) stInput.value = defaultStationName;
+  if (defaultDest && destInput) destInput.value = defaultDest;
+
+  if (titleInput) {
+    if (defaultTitle) {
+      titleInput.value = defaultTitle;
+    } else if (defaultStationName && defaultDest) {
+      titleInput.value = `${defaultStationName} ➔ ${defaultDest}`;
+    } else if (defaultStationName) {
+      titleInput.value = `${defaultStationName} 출발`;
+    }
   }
-  if (defaultRouteNo) {
-    const routeInput = document.getElementById("inputRouteNo");
-    if (routeInput) routeInput.value = defaultRouteNo;
-  }
-  if (defaultDest) {
-    const destInput = document.getElementById("inputDestination");
-    if (destInput) destInput.value = defaultDest;
+
+  if (defaultRouteNo && routeInput) {
+    routeInput.value = defaultRouteNo;
   }
 }
 

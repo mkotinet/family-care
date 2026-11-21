@@ -1,0 +1,31 @@
+services:
+  family-care:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: family-care-app:latest
+    container_name: family-care-app
+    restart: always
+    ports:
+      - "3090:8000"
+    environment:
+      - TZ=Asia/Seoul
+      - DB_PATH=/app/data/family_care.db
+      - PORT=8000
+      - DATA_GO_KR_API_KEY=${DATA_GO_KR_API_KEY:-}
+      - KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY:-}
+      - DEFAULT_LAT=37.6434558
+      - DEFAULT_LON=127.2311716
+      - DEFAULT_ADDRESS=경기도 남양주시 평내동 평내유진마젤란
+    volumes:
+      - family_care_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  family_care_data:
+    name: family_care_data

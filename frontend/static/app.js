@@ -502,7 +502,7 @@ function openWhatsNewModal() {
 }
 
 function closeWhatsNewModal(e) {
-  if (e && e.target && e.target.id !== "modalWhatsNew" && !e.target.classList.contains("sheet-close-btn") && !e.target.classList.contains("btn-primary")) {
+  if (e && e.target && e.target.id !== "modalWhatsNew" && !e.target.closest(".sheet-close-btn") && !e.target.closest(".btn-primary") && !e.target.closest(".btn-secondary")) {
     return;
   }
   const modal = document.getElementById('modalWhatsNew');
@@ -696,7 +696,10 @@ async function loadFavorites() {
     const transit = await transitRes.json();
     const restaurants = await restRes.json();
     const places = await placesRes.json();
+    AppState.loadedTransit = transit || [];
+    AppState.loadedRestaurants = restaurants || [];
     AppState.favoritePlaces = places || [];
+    AppState.loadedPlaces = places || [];
 
     const items = [];
 
@@ -707,7 +710,7 @@ async function loadFavorites() {
           <div class="fav-card-top" style="display: flex; justify-content: space-between; align-items: center;">
             <span class="fav-card-tag" style="background: #e0f2fe; color: #0369a1;">🚌 ${t.route_no}</span>
             <div style="display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation()">
-              <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick='openEditTransitModal(${JSON.stringify(t).replace(/'/g, "&#39;")})'>✏️</button>
+              <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick="openEditTransitModalById(${t.id})">✏️</button>
               <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="삭제" onclick="deleteTransitRoute(${t.id})">🗑️</button>
             </div>
           </div>
@@ -748,7 +751,7 @@ async function loadFavorites() {
           <div class="fav-card-top" style="display: flex; justify-content: space-between; align-items: center;">
             <span class="fav-card-tag" style="background: #f1f5f9; color: #334155;">⭐ ${p.category}</span>
             <div style="display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation()">
-              <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick='openEditPlaceModal(${JSON.stringify(p).replace(/'/g, "&#39;")})'>✏️</button>
+              <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick="openEditPlaceModalById(${p.id})">✏️</button>
               <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="삭제" onclick="deleteFavoritePlace(${p.id})">🗑️</button>
             </div>
           </div>
@@ -1844,13 +1847,6 @@ async function selectBusStopOnMap(stop) {
     }
 
     const extraBox = document.getElementById("selPlaceExtraBox");
-    if (extraBox && AppState.selectedPlace && AppState.selectedPlace.name === stop.name) {
-      extraBox.innerHTML = extraHtml;
-    }
-  } catch (e) {
-    console.warn("fetch station arrivals error:", e);
-  }
-}
     if (extraBox && AppState.selectedPlace && AppState.selectedPlace.name === stop.name) {
       extraBox.innerHTML = extraHtml;
     }
@@ -3213,8 +3209,20 @@ async function deleteFavoritePlace(placeId) {
   }
 }
 
+// 즐겨찾기 ID 기반 모달 열기 헬퍼 (인라인 JSON 이스케이프 결함 원천 방지)
+function openEditPlaceModalById(placeId) {
+  const item = (AppState.loadedPlaces || AppState.favoritePlaces || []).find(p => String(p.id) === String(placeId));
+  if (item) openEditPlaceModal(item);
+}
+
+function openEditTransitModalById(routeId) {
+  const item = (AppState.loadedTransit || []).find(t => String(t.id) === String(routeId));
+  if (item) openEditTransitModal(item);
+}
+
 // 즐겨찾기 장소 수정 모달 열기
 function openEditPlaceModal(favItem) {
+  if (!favItem) return;
   const modal = document.getElementById("modalEditFavorite");
   if (!modal) return;
   document.getElementById("editFavType").value = "place";
@@ -3228,6 +3236,7 @@ function openEditPlaceModal(favItem) {
 
 // 즐겨찾기 버스 루트 수정 모달 열기
 function openEditTransitModal(routeItem) {
+  if (!routeItem) return;
   const modal = document.getElementById("modalEditFavorite");
   if (!modal) return;
   document.getElementById("editFavType").value = "transit";

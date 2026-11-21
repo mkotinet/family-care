@@ -1020,11 +1020,12 @@ function renderLeafletCategoryMarkers(map) {
     AppState.cachedTransitStops.forEach((s, idx) => {
       const sLat = s.lat || (AppState.location.lat + (Math.sin(idx + 1) * 0.003));
       const sLon = s.lon || (AppState.location.lon + (Math.cos(idx + 1) * 0.003));
+      const dirTag = s.direction === "hopyeong" ? " (호평행)" : (s.direction === "seoul" ? " (서울행)" : "");
       const icon = L.divIcon({
         className: 'cat-marker-pin',
-        html: `<div style="background:#0284c7;color:white;padding:3px 6px;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);border:1px solid #ffffff;">🚏 ${s.name}</div>`,
-        iconSize: [80, 24],
-        iconAnchor: [40, 12]
+        html: `<div style="background:#0284c7;color:white;padding:3px 6px;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);border:1px solid #ffffff;">🚏 ${s.name}${dirTag}</div>`,
+        iconSize: [85, 24],
+        iconAnchor: [42, 12]
       });
       const marker = L.marker([sLat, sLon], { icon }).addTo(map);
       marker.on("click", () => {
@@ -1138,6 +1139,7 @@ function renderKakaoCategoryMarkers() {
     AppState.cachedTransitStops.forEach((s, idx) => {
       const sLat = Number(s.lat || (AppState.location.lat + (Math.sin(idx + 1) * 0.003)));
       const sLon = Number(s.lon || (AppState.location.lon + (Math.cos(idx + 1) * 0.003)));
+      const dirTag = s.direction === "hopyeong" ? " (호평행)" : (s.direction === "seoul" ? " (서울행)" : "");
       const pos = new kakao.maps.LatLng(sLat, sLon);
       const marker = new kakao.maps.Marker({
         position: pos,
@@ -1147,7 +1149,7 @@ function renderKakaoCategoryMarkers() {
 
       const overlay = new kakao.maps.CustomOverlay({
         position: pos,
-        content: `<div onclick="selectBusStopOnMapById(${idx}); event.stopPropagation();" style="background:#0284c7;color:white;padding:3px 7px;border-radius:8px;font-size:11px;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,0.25);cursor:pointer;white-space:nowrap;">🚏 ${s.name}</div>`,
+        content: `<div onclick="selectBusStopOnMapById(${idx}); event.stopPropagation();" style="background:#0284c7;color:white;padding:3px 7px;border-radius:8px;font-size:11px;font-weight:800;box-shadow:0 2px 6px rgba(0,0,0,0.25);cursor:pointer;white-space:nowrap;border:1px solid #ffffff;">🚏 ${s.name}${dirTag}</div>`,
         yAnchor: 2.4,
         clickable: true
       });
@@ -1457,47 +1459,44 @@ function updateMapHelperText() {
   }
 }
 
-// 긴 행정구역/지번 주소를 직관적이고 친숙한 단지/건물/랜드마크 명칭으로 변환 (사용자 피드백 반영)
+// 긴 행정구역/지번 주소를 직관적이고 친숙한 단지/건물/랜드마크 명칭으로 변환 (카카오버스 공식 명칭 최우선 보존)
 function formatFriendlyPlaceName(lat, lon, rawAddress = "", buildingName = "") {
-  // 1. 역지오코딩 빌딩명/단지명이 제공된 경우 최우선 정제
-  if (buildingName && typeof buildingName === "string" && buildingName.trim()) {
-    const b = buildingName.trim();
-    if (b.includes("유진") || b.includes("마젤란")) return "평내유진아파트";
-    if (b.includes("화성")) return "평내화성파크힐즈";
-    if (b.includes("대주")) return "평내대주파크빌";
-    if (b.includes("신명")) return "평내신명아파트";
-    if (b.includes("중흥")) return "평내중흥S클래스";
-    if (b.includes("금강")) return "호평마을금강아파트";
-    if (b.includes("이마트")) return "이마트 남양주점";
-    return b.endsWith("아파트") ? b : `${b}아파트`;
-  }
-
   const addrStr = String(rawAddress || "");
+  const bStr = String(buildingName || "").trim();
 
-  // 2. 우리 집(평내유진마젤란) 및 평내동 핵심 거점 지오펜스 (반경 180m 또는 지번 624)
-  const homeDist = calcDistanceKm(lat, lon, 37.6434558, 127.2311716) * 1000;
-  if (homeDist <= 180 || addrStr.includes("624") || addrStr.includes("평내로 145") || addrStr.includes("유진")) {
-    return "평내유진아파트";
+  // 0. 이미 공식 정류소 명칭 형식을 갖추고 있는 경우 원형 보존
+  if (bStr.includes("평내화성.유진아파트") || addrStr.includes("평내화성.유진아파트")) return "평내화성.유진아파트";
+  if (bStr.includes("평내신명.대주.금호아파트") || addrStr.includes("평내신명.대주.금호아파트")) return "평내신명.대주.금호아파트";
+  if (bStr.includes("평내중흥.유라.삼창아파트") || addrStr.includes("평내중흥.유라.삼창아파트")) return "평내중흥.유라.삼창아파트";
+
+  // 1. 역지오코딩 빌딩명/단지명이 제공된 경우 최우선 정제
+  if (bStr) {
+    if ((bStr.includes("화성") && bStr.includes("유진")) || bStr.includes("몬테소리")) return "평내화성.유진아파트";
+    if (bStr.includes("유진") || bStr.includes("마젤란")) return "평내화성.유진아파트";
+    if (bStr.includes("화성")) return "평내화성파크힐즈";
+    if (bStr.includes("대주") && bStr.includes("신명")) return "평내신명.대주.금호아파트";
+    if (bStr.includes("대주")) return "평내대주파크빌";
+    if (bStr.includes("신명")) return "평내신명아파트";
+    if (bStr.includes("중흥")) return "평내중흥.유라.삼창아파트";
+    if (bStr.includes("금강")) return "호평마을금강아파트";
+    if (bStr.includes("이마트")) return "이마트 남양주점";
+    return bStr.endsWith("아파트") ? bStr : `${bStr}아파트`;
   }
 
-  const hwaseongDist = calcDistanceKm(lat, lon, 37.643900, 127.231500) * 1000;
-  if (hwaseongDist <= 120 || addrStr.includes("623") || addrStr.includes("625") || addrStr.includes("화성")) {
-    return "평내화성파크힐즈";
+  // 2. 평내화성.유진아파트 (유진몬테소리어린이집 & 화성파크힐즈 사이 평내로 정류소 지오펜스 160m)
+  const yujinBusDist = calcDistanceKm(lat, lon, 37.643720, 127.231200) * 1000;
+  if (yujinBusDist <= 160 || addrStr.includes("624") || addrStr.includes("평내로 145") || addrStr.includes("유진") || addrStr.includes("화성")) {
+    return "평내화성.유진아파트";
   }
 
   const shinmyeongDist = calcDistanceKm(lat, lon, 37.644500, 127.233500) * 1000;
   if (shinmyeongDist <= 150 || addrStr.includes("617") || addrStr.includes("신명")) {
-    return "평내신명아파트";
-  }
-
-  const daejuDist = calcDistanceKm(lat, lon, 37.644800, 127.232500) * 1000;
-  if (daejuDist <= 150 || addrStr.includes("618") || addrStr.includes("대주")) {
-    return "평내대주파크빌";
+    return "평내신명.대주.금호아파트";
   }
 
   const jungheungDist = calcDistanceKm(lat, lon, 37.642500, 127.235500) * 1000;
   if (jungheungDist <= 180 || addrStr.includes("603") || addrStr.includes("중흥")) {
-    return "평내중흥S클래스";
+    return "평내중흥.유라.삼창아파트";
   }
 
   const stationDist = calcDistanceKm(lat, lon, 37.653412, 127.244123) * 1000;
@@ -1507,7 +1506,7 @@ function formatFriendlyPlaceName(lat, lon, rawAddress = "", buildingName = "") {
 
   const centerDist = calcDistanceKm(lat, lon, 37.641500, 127.229000) * 1000;
   if (centerDist <= 180 || addrStr.includes("110") || addrStr.includes("주민센터")) {
-    return "평내동주민센터";
+    return "평내동주민센터.남양주소방서";
   }
 
   // 3. 일반 주소인 경우 불필요한 광역 시·도 접두사 제거
@@ -1932,10 +1931,12 @@ function navigateSelectedPlace() {
   window.open(url, "_blank");
 }
 
-// 버스 정류소 핀 클릭 시 실시간 도착 정보 조회 및 자동 출발지/도착지 즐겨찾기 연동
-async function selectBusStopOnMap(stop) {
+// 버스 정류소 핀 클릭 시 실시간 도착 정보 조회 및 자동 출발지/도착지 즐겨찾기 연동 (양방향 지원)
+async function selectBusStopOnMap(stop, customDirection = null) {
   const sLat = stop.lat || (AppState.location.lat + 0.001);
   const sLon = stop.lon || (AppState.location.lon - 0.001);
+  const curDir = customDirection || stop.direction || AppState.selectedBusStopDirection || "hopyeong";
+  AppState.selectedBusStopDirection = curDir;
 
   // 만약 2단계 루트 빌더에서 출발지가 이미 지정된 상태라면 -> 즉시 도착지로 매핑 & 바로 즐겨찾기 저장 뷰 오픈!
   if (AppState.transitRouteBuilder.origin && !AppState.transitRouteBuilder.destination) {
@@ -1962,6 +1963,10 @@ async function selectBusStopOnMap(stop) {
     AppState.leafletCategoryMap.panTo([sLat, sLon]);
   }
 
+  const isHopyeong = curDir === "hopyeong";
+  const defaultNextDir = isHopyeong ? "평내신명.대주.금호아파트 방면" : "평내동주민센터.남양주소방서 방면";
+  const defaultArsId = isHopyeong ? "23453" : "23454";
+
   openSelectedPlaceCard({
     category: "교통",
     categoryTitle: "🚏 출발 정류소 선택됨",
@@ -1969,7 +1974,7 @@ async function selectBusStopOnMap(stop) {
     name: stop.name,
     address: `남양주시 평내동 (집에서 약 ${stop.distance || 120}m)`,
     phone: "",
-    status_info: "출발지로 지정됨 · 이제 도착 정류소를 지도에서 터치하세요",
+    status_info: `출발지 지정됨 · ${isHopyeong ? '호평동·평내호평역 방면' : '청량리·잠실·서울 방면'}`,
     lat: sLat,
     lon: sLon,
     extraHtml: `
@@ -1978,9 +1983,20 @@ async function selectBusStopOnMap(stop) {
         <div style="font-size: 11.5px; color: #334155; line-height: 1.4; margin-bottom: 8px;">
           👉 지도에서 <b>도착할 정류소(또는 위치)</b>를 터치하시면 <b>'출발지 ➔ 도착지'</b> 루트가 자동 생성되어 원클릭으로 즐겨찾기 저장할 수 있습니다.
         </div>
+
+        <!-- 🏢 호평동 방면 vs 🏙️ 서울 방면 양방향 원클릭 전환 탭 바 -->
+        <div style="display: flex; gap: 6px; margin: 8px 0; background: #e2e8f0; padding: 4px; border-radius: 10px;">
+          <button style="flex: 1; padding: 8px 4px; font-size: 11.5px; font-weight: 800; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; ${isHopyeong ? 'background: #0284c7; color: white; box-shadow: 0 2px 5px rgba(2,132,199,0.3);' : 'background: white; color: #475569;'}" onclick="switchStationDirection('${stop.name}', 'hopyeong')">
+            🏢 호평동·수진사 방면
+          </button>
+          <button style="flex: 1; padding: 8px 4px; font-size: 11.5px; font-weight: 800; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; ${!isHopyeong ? 'background: #0284c7; color: white; box-shadow: 0 2px 5px rgba(2,132,199,0.3);' : 'background: white; color: #475569;'}" onclick="switchStationDirection('${stop.name}', 'seoul')">
+            🏙️ 서울·잠실·청량리 방면
+          </button>
+        </div>
+
         <div style="display: flex; gap: 6px;">
-          <button class="btn-primary" style="flex: 2; padding: 10px; font-size: 12px; font-weight: 800; background: #0284c7;" onclick="saveTransitRouteDirect('${stop.name}', '시내방면')">
-            ⭐ [${stop.name}] 단독 즐겨찾기 저장
+          <button class="btn-primary" style="flex: 2; padding: 10px; font-size: 12px; font-weight: 800; background: #0284c7;" onclick="saveTransitRouteDirect('${stop.name}', '${isHopyeong ? '호평동·수진사 방면' : '청량리·잠실 서울 방면'}')">
+            ⭐ [${stop.name}] ${isHopyeong ? '호평동 방면' : '서울 방면'} 즐겨찾기 저장
           </button>
           <button class="btn-secondary" style="flex: 1; padding: 10px; font-size: 11px;" onclick="resetTransitRouteBuilder()">
             🔄 초기화
@@ -1992,19 +2008,42 @@ async function selectBusStopOnMap(stop) {
   });
 
   try {
-    const res = await fetch(`/api/transit/station-arrivals?station_name=${encodeURIComponent(stop.name)}`);
+    const res = await fetch(`/api/transit/station-arrivals?station_name=${encodeURIComponent(stop.name)}&direction=${curDir}`);
     const data = await res.json();
     const arrivals = data.arrivals || [];
+    const nextDir = data.next_direction || defaultNextDir;
+    const arsId = data.ars_id || defaultArsId;
 
     let extraHtml = `
       <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 12px; padding: 12px; margin-bottom: 10px;">
-        <div style="font-weight: 800; color: #166534; font-size: 13px; margin-bottom: 4px;">🚩 출발지: <b>${stop.name}</b></div>
-        <div style="font-size: 11.5px; color: #334155; line-height: 1.4; margin-bottom: 8px;">
-          👉 지도에서 <b>도착할 정류소</b>를 터치하시면 <b>'출발지 ➔ 도착지'</b> 루트가 자동 완성됩니다!
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+          <div style="font-weight: 800; color: #166534; font-size: 13.5px;">🚩 출발지: <b>${stop.name}</b></div>
+          <span style="font-size: 11px; background: #dcfce7; color: #15803d; padding: 2px 6px; border-radius: 6px; font-weight: 700;">정류소 번호: ${arsId}</span>
         </div>
+
+        <!-- 카카오버스 공식 방면 정보 배너 -->
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 7px 10px; margin: 6px 0; font-size: 12px; color: #1e40af; font-weight: 700; display: flex; align-items: center; gap: 6px;">
+          <span>👉</span>
+          <span>다음 방면: <b>${nextDir}</b></span>
+        </div>
+
+        <div style="font-size: 11.5px; color: #334155; line-height: 1.4; margin-bottom: 6px;">
+          지도에서 <b>도착할 정류소</b>를 터치하시면 <b>'출발지 ➔ 도착지'</b> 루트가 자동 완성됩니다!
+        </div>
+
+        <!-- 🏢 호평동 방면 vs 🏙️ 서울 방면 양방향 원클릭 전환 탭 바 -->
+        <div style="display: flex; gap: 6px; margin: 8px 0; background: #e2e8f0; padding: 4px; border-radius: 10px;">
+          <button style="flex: 1; padding: 8px 4px; font-size: 11.5px; font-weight: 800; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; ${isHopyeong ? 'background: #0284c7; color: white; box-shadow: 0 2px 5px rgba(2,132,199,0.3);' : 'background: white; color: #475569;'}" onclick="switchStationDirection('${stop.name}', 'hopyeong')">
+            🏢 호평동·수진사 방면
+          </button>
+          <button style="flex: 1; padding: 8px 4px; font-size: 11.5px; font-weight: 800; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; ${!isHopyeong ? 'background: #0284c7; color: white; box-shadow: 0 2px 5px rgba(2,132,199,0.3);' : 'background: white; color: #475569;'}" onclick="switchStationDirection('${stop.name}', 'seoul')">
+            🏙️ 서울·잠실·청량리 방면
+          </button>
+        </div>
+
         <div style="display: flex; gap: 6px;">
-          <button class="btn-primary" style="flex: 2; padding: 10px; font-size: 12px; font-weight: 800; background: #0284c7;" onclick="saveTransitRouteDirect('${stop.name}', '시내방면')">
-            ⭐ [${stop.name}] 단독 즐겨찾기 저장
+          <button class="btn-primary" style="flex: 2; padding: 10px; font-size: 12px; font-weight: 800; background: #0284c7;" onclick="saveTransitRouteDirect('${stop.name}', '${isHopyeong ? '호평동·수진사 방면' : '청량리·잠실 서울 방면'}')">
+            ⭐ [${stop.name}] ${isHopyeong ? '호평동 방면' : '서울 방면'} 즐겨찾기 저장
           </button>
           <button class="btn-secondary" style="flex: 1; padding: 10px; font-size: 11px;" onclick="resetTransitRouteBuilder()">
             🔄 초기화
@@ -2016,8 +2055,8 @@ async function selectBusStopOnMap(stop) {
     if (arrivals.length > 0) {
       extraHtml += `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-          <span style="font-weight: 800; color: #0369a1; font-size: 12px;">🚌 실시간 도착 예정 버스 (${arrivals.length}대)</span>
-          <span style="font-size: 11px; color: #64748b;">🔔 터치 시 10/5/3분 알림 예약</span>
+          <span style="font-weight: 800; color: #0369a1; font-size: 12px;">🚌 실시간 도착 예정 버스 (${arrivals.length}대 - ${isHopyeong ? '호평동 방면' : '서울 방면'})</span>
+          <span style="font-size: 11px; color: #64748b;">🔔 터치 시 10/5/3분 알림</span>
         </div>
         <div class="station-arrival-list">
           ${arrivals.map(a => {
@@ -2056,6 +2095,26 @@ async function selectBusStopOnMap(stop) {
     console.warn("fetch station arrivals error:", e);
   }
 }
+
+// 정류소 상세 시트에서 [호평동 방면] ⇄ [서울 방면] 방향 즉시 전환 함수
+function switchStationDirection(stationName, newDirection) {
+  AppState.selectedBusStopDirection = newDirection;
+  let targetStop = (AppState.cachedTransitStops || []).find(s => s.name === stationName);
+  if (!targetStop && AppState.selectedPlace) {
+    targetStop = {
+      name: stationName,
+      lat: AppState.selectedPlace.lat,
+      lon: AppState.selectedPlace.lon,
+      direction: newDirection
+    };
+  } else if (targetStop) {
+    targetStop = Object.assign({}, targetStop, { direction: newDirection });
+  }
+  if (targetStop) {
+    selectBusStopOnMap(targetStop, newDirection);
+  }
+}
+window.switchStationDirection = switchStationDirection;
 
 // ==========================================
 // 카테고리별 상세 렌더러 함수들

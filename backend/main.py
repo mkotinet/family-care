@@ -312,9 +312,9 @@ async def api_transit_nearby_stops(lat: float = Query(None), lon: float = Query(
     return stops
 
 @app.get("/api/transit/station-arrivals")
-async def api_transit_station_arrivals(station_name: str = Query(...)):
-    """특정 정류소의 실시간 버스 도착 정보 조회"""
-    data = await get_station_arrivals(station_name)
+async def api_transit_station_arrivals(station_name: str = Query(...), direction: str = Query(None)):
+    """특정 정류소의 실시간 버스 도착 정보 조회 (호평동 vs 청량리/잠실 양방향 지원)"""
+    data = await get_station_arrivals(station_name, direction=direction or "hopyeong")
     return data
 
 @app.post("/api/transit/add")

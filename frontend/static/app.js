@@ -1310,6 +1310,9 @@ function clearTransitRouteLine() {
 }
 
 function setTransitOrigin(place) {
+  if (place && place.name) {
+    place.name = formatFriendlyPlaceName(place.lat, place.lon, place.address || "", place.name);
+  }
   AppState.transitRouteBuilder.origin = place;
   AppState.transitRouteBuilder.destination = null;
   clearTransitRouteLine();
@@ -1346,6 +1349,9 @@ function setTransitOrigin(place) {
 }
 
 function setTransitDestination(place) {
+  if (place && place.name) {
+    place.name = formatFriendlyPlaceName(place.lat, place.lon, place.address || "", place.name);
+  }
   if (!AppState.transitRouteBuilder.origin) {
     setTransitOrigin(place);
     return;
@@ -1451,7 +1457,75 @@ function updateMapHelperText() {
   }
 }
 
-function findNearestBusStop(lat, lon, maxDistanceMeters = 300) {
+// 긴 행정구역/지번 주소를 직관적이고 친숙한 단지/건물/랜드마크 명칭으로 변환 (사용자 피드백 반영)
+function formatFriendlyPlaceName(lat, lon, rawAddress = "", buildingName = "") {
+  // 1. 역지오코딩 빌딩명/단지명이 제공된 경우 최우선 정제
+  if (buildingName && typeof buildingName === "string" && buildingName.trim()) {
+    const b = buildingName.trim();
+    if (b.includes("유진") || b.includes("마젤란")) return "평내유진아파트";
+    if (b.includes("화성")) return "평내화성파크힐즈";
+    if (b.includes("대주")) return "평내대주파크빌";
+    if (b.includes("신명")) return "평내신명아파트";
+    if (b.includes("중흥")) return "평내중흥S클래스";
+    if (b.includes("금강")) return "호평마을금강아파트";
+    if (b.includes("이마트")) return "이마트 남양주점";
+    return b.endsWith("아파트") ? b : `${b}아파트`;
+  }
+
+  const addrStr = String(rawAddress || "");
+
+  // 2. 우리 집(평내유진마젤란) 및 평내동 핵심 거점 지오펜스 (반경 180m 또는 지번 624)
+  const homeDist = calcDistanceKm(lat, lon, 37.6434558, 127.2311716) * 1000;
+  if (homeDist <= 180 || addrStr.includes("624") || addrStr.includes("평내로 145") || addrStr.includes("유진")) {
+    return "평내유진아파트";
+  }
+
+  const hwaseongDist = calcDistanceKm(lat, lon, 37.643900, 127.231500) * 1000;
+  if (hwaseongDist <= 120 || addrStr.includes("623") || addrStr.includes("625") || addrStr.includes("화성")) {
+    return "평내화성파크힐즈";
+  }
+
+  const shinmyeongDist = calcDistanceKm(lat, lon, 37.644500, 127.233500) * 1000;
+  if (shinmyeongDist <= 150 || addrStr.includes("617") || addrStr.includes("신명")) {
+    return "평내신명아파트";
+  }
+
+  const daejuDist = calcDistanceKm(lat, lon, 37.644800, 127.232500) * 1000;
+  if (daejuDist <= 150 || addrStr.includes("618") || addrStr.includes("대주")) {
+    return "평내대주파크빌";
+  }
+
+  const jungheungDist = calcDistanceKm(lat, lon, 37.642500, 127.235500) * 1000;
+  if (jungheungDist <= 180 || addrStr.includes("603") || addrStr.includes("중흥")) {
+    return "평내중흥S클래스";
+  }
+
+  const stationDist = calcDistanceKm(lat, lon, 37.653412, 127.244123) * 1000;
+  if (stationDist <= 250 || addrStr.includes("늘을2로 20") || addrStr.includes("호평역")) {
+    return "평내호평역";
+  }
+
+  const centerDist = calcDistanceKm(lat, lon, 37.641500, 127.229000) * 1000;
+  if (centerDist <= 180 || addrStr.includes("110") || addrStr.includes("주민센터")) {
+    return "평내동주민센터";
+  }
+
+  // 3. 일반 주소인 경우 불필요한 광역 시·도 접두사 제거
+  let cleaned = addrStr
+    .replace(/^경기\s*남양주시\s*/, "")
+    .replace(/^경기도\s*남양주시\s*/, "")
+    .replace(/\s*정류소$/, "")
+    .replace(/\s*정류장$/, "")
+    .trim();
+
+  if (!cleaned || cleaned.length > 25) {
+    return `평내동 (${lat.toFixed(3)}, ${lon.toFixed(3)})`;
+  }
+  return cleaned;
+}
+window.formatFriendlyPlaceName = formatFriendlyPlaceName;
+
+function findNearestBusStop(lat, lon, maxDistanceMeters = 350) {
   let nearest = null;
   let minDist = Infinity;
   (AppState.cachedTransitStops || []).forEach(s => {
@@ -1482,16 +1556,16 @@ function handleCategoryMapClick(lat, lon) {
     return;
   }
   if (AppState.currentCategory === "transit") {
-    // 300m 이내에 등록된 버스 정류소가 있는지 우선 감지하여 자동 매핑
-    const nearestStop = findNearestBusStop(lat, lon, 300);
+    // 350m 이내에 등록된 버스 정류소가 있는지 우선 감지하여 자동 매핑
+    const nearestStop = findNearestBusStop(lat, lon, 350);
 
     if (AppState.transitRouteBuilder.origin && !AppState.transitRouteBuilder.destination) {
-      const destName = nearestStop ? nearestStop.name : `정류소 (${lat.toFixed(3)}, ${lon.toFixed(3)})`;
+      const destName = nearestStop ? nearestStop.name : formatFriendlyPlaceName(lat, lon, nearestStop ? nearestStop.address : "");
       setTransitDestination({
         name: destName,
         lat,
         lon,
-        address: nearestStop ? (nearestStop.address || `남양주시 평내동 정류소`) : `남양주시 평내동 정류소`
+        address: nearestStop ? (nearestStop.address || `남양주시 평내동`) : `남양주시 평내동`
       });
     } else {
       if (nearestStop) {
@@ -1514,11 +1588,11 @@ async function dropCustomTransitPin(lat, lon) {
     AppState.customTransitPin = null;
   }
 
-  const nearest = findNearestBusStop(lat, lon, 300);
-  let pinTitle = nearest ? nearest.name : `정류소 (${lat.toFixed(3)}, ${lon.toFixed(3)})`;
-  let pinAddress = nearest ? (nearest.address || "남양주시 평내동 정류소") : `남양주시 평내동 정류소`;
+  const nearest = findNearestBusStop(lat, lon, 350);
+  let pinTitle = nearest ? nearest.name : formatFriendlyPlaceName(lat, lon);
+  let pinAddress = nearest ? (nearest.address || "경기 남양주시 평내동") : "경기 남양주시 평내동";
 
-  // 카카오 역지오코딩 시도하여 정확한 도로명 주소 획득
+  // 카카오 역지오코딩 시도하여 정확한 도로명/건물명 획득
   if (!nearest && typeof kakao !== "undefined" && kakao.maps && kakao.maps.services) {
     try {
       const geocoder = new kakao.maps.services.Geocoder();
@@ -1527,14 +1601,27 @@ async function dropCustomTransitPin(lat, lon) {
           const r = result[0];
           const road = r.road_address ? r.road_address.address_name : "";
           const jibun = r.address ? r.address.address_name : "";
+          const bName = (r.road_address && r.road_address.building_name) ? r.road_address.building_name : "";
           const addr = road || jibun;
-          if (addr) {
-            pinTitle = `${addr} 정류소`;
-            pinAddress = addr;
+          if (addr || bName) {
+            pinTitle = formatFriendlyPlaceName(lat, lon, addr, bName);
+            pinAddress = addr || `경기 남양주시 평내동`;
             const nameEl = document.getElementById("selPlaceName");
             if (nameEl) nameEl.textContent = pinTitle;
             const addrEl = document.getElementById("selPlaceAddress");
             if (addrEl) addrEl.textContent = pinAddress;
+
+            const btnOrigin = document.getElementById("btnSetCustomOrigin");
+            if (btnOrigin) {
+              btnOrigin.onclick = () => setTransitOrigin({ name: pinTitle, lat, lon, address: pinAddress });
+            }
+            const btnDest = document.getElementById("btnSetCustomDest");
+            if (btnDest) {
+              btnDest.onclick = () => {
+                setTransitOrigin({ name: "평내유진아파트", lat: AppState.location.lat, lon: AppState.location.lon, address: "우리 집" });
+                setTransitDestination({ name: pinTitle, lat, lon, address: pinAddress });
+              };
+            }
           }
         }
       });
@@ -1575,10 +1662,10 @@ async function dropCustomTransitPin(lat, lon) {
         <div style="font-weight: 800; color: #166534; font-size: 12px; margin-bottom: 4px;">🚩 나만의 버스 루트 만들기 (1단계)</div>
         <div style="font-size: 11px; color: #334155; margin-bottom: 8px;">이 위치를 출발지로 할까요, 아니면 도착지로 할까요?</div>
         <div style="display: flex; gap: 6px;">
-          <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 11px; background: #0284c7;" onclick='setTransitOrigin({ name: "${pinTitle}", lat: ${lat}, lon: ${lon}, address: "${pinAddress}" })'>
+          <button id="btnSetCustomOrigin" class="btn-primary" style="flex: 1; padding: 8px; font-size: 11px; background: #0284c7;" onclick='setTransitOrigin({ name: "${pinTitle}", lat: ${lat}, lon: ${lon}, address: "${pinAddress}" })'>
             🚩 출발지로 설정
           </button>
-          <button class="btn-secondary" style="flex: 1; padding: 8px; font-size: 11px;" onclick='setTransitOrigin({ name: "평내유진마젤란(우리집)", lat: ${AppState.location.lat}, lon: ${AppState.location.lon}, address: "우리 집" }); setTransitDestination({ name: "${pinTitle}", lat: ${lat}, lon: ${lon}, address: "${pinAddress}" });'>
+          <button id="btnSetCustomDest" class="btn-secondary" style="flex: 1; padding: 8px; font-size: 11px;" onclick='setTransitOrigin({ name: "평내유진아파트", lat: ${AppState.location.lat}, lon: ${AppState.location.lon}, address: "우리 집" }); setTransitDestination({ name: "${pinTitle}", lat: ${lat}, lon: ${lon}, address: "${pinAddress}" });'>
             🏁 우리집에서 오는 도착지로 설정
           </button>
         </div>

@@ -9,13 +9,28 @@ from backend.mock_data import get_simulated_transit
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
-async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1000):
-    cache_key = f"bus_stops_{round(lat, 3)}_{round(lon, 3)}"
+async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
+    cache_key = f"bus_stops_v3_{round(lat, 3)}_{round(lon, 3)}"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
 
-    stops = []
+    # 평내·호평 핵심 거점 정류소 10대 기본 탑재 (명칭 직관화 보장)
+    core_stops = [
+        {"id": "s_yujin", "name": "평내유진아파트", "full_name": "평내유진아파트 정류소", "address": "경기 남양주시 평내동 624 (평내로 145)", "latitude": 37.6434558, "longitude": 127.2311716},
+        {"id": "s_hwaseong", "name": "평내화성·유진아파트", "full_name": "평내화성·유진아파트 정류소", "address": "경기 남양주시 평내동 623 (평내로 140)", "latitude": 37.643900, "longitude": 127.231500},
+        {"id": "s_shinmyeong", "name": "평내마을신명·대주아파트", "full_name": "평내마을신명·대주아파트 정류소", "address": "경기 남양주시 평내로 125", "latitude": 37.644500, "longitude": 127.233500},
+        {"id": "s_jungheung", "name": "평내중흥S클래스1단지", "full_name": "평내중흥S클래스1단지 정류소", "address": "경기 남양주시 평내로 85", "latitude": 37.642500, "longitude": 127.235500},
+        {"id": "s_center", "name": "평내동주민센터·남양주소방서", "full_name": "평내동주민센터 정류소", "address": "경기 남양주시 평내로 110", "latitude": 37.641500, "longitude": 127.229000},
+        {"id": "s_hopyeong", "name": "평내호평역", "full_name": "평내호평역 정류소", "address": "경기 남양주시 늘을2로 20", "latitude": 37.653412, "longitude": 127.244123},
+        {"id": "s_intercity", "name": "시외버스 매표소", "full_name": "시외버스 매표소", "address": "경기 남양주시 평내동 211-15", "latitude": 37.650108, "longitude": 127.237100},
+        {"id": "s_geumgang", "name": "호평마을금강아파트", "full_name": "호평마을금강아파트 정류소", "address": "경기 남양주시 늘을3로 45", "latitude": 37.655000, "longitude": 127.243900},
+        {"id": "s_emart", "name": "이마트 남양주점", "full_name": "이마트 남양주점 정류소", "address": "경기 남양주시 늘을2로 27", "latitude": 37.654200, "longitude": 127.245000},
+        {"id": "s_school", "name": "평내초등학교", "full_name": "평내초등학교 정류소", "address": "경기 남양주시 평내로 72", "latitude": 37.646123, "longitude": 127.234512}
+    ]
+
+    stops_dict = {s["name"]: dict(s) for s in core_stops}
+
     if KAKAO_REST_API_KEY:
         try:
             url = "https://dapi.kakao.com/v2/local/search/keyword.json"
@@ -31,29 +46,35 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1000):
             with urllib.request.urlopen(req, timeout=4) as resp:
                 data = json.loads(resp.read().decode())
                 for d in data.get("documents", []):
-                    stops.append({
-                        "id": d.get("id"),
-                        "name": d.get("place_name").replace(" 버스정류장", "").strip(),
-                        "full_name": d.get("place_name"),
-                        "address": d.get("road_address_name") or d.get("address_name"),
-                        "latitude": float(d.get("y")),
-                        "longitude": float(d.get("x")),
-                        "distance": int(d.get("distance", 0))
-                    })
+                    raw_name = d.get("place_name").replace(" 버스정류장", "").replace(" 정류소", "").strip()
+                    if raw_name not in stops_dict:
+                        stops_dict[raw_name] = {
+                            "id": d.get("id"),
+                            "name": raw_name,
+                            "full_name": d.get("place_name"),
+                            "address": d.get("road_address_name") or d.get("address_name"),
+                            "latitude": float(d.get("y")),
+                            "longitude": float(d.get("x")),
+                            "distance": int(d.get("distance", 0))
+                        }
         except Exception:
             pass
 
-    if not stops:
-        # 평내동 기본 정류소 폴백
-        stops = [
-            {"id": "s1", "name": "평내유진아파트", "full_name": "평내유진아파트 버스정류장", "address": "남양주시 평내로 145", "latitude": 37.6434558, "longitude": 127.2311716, "distance": 50},
-            {"id": "s2", "name": "평내화성·유진아파트", "full_name": "평내화성·유진아파트 정류소", "address": "남양주시 평내로 140", "latitude": 37.643900, "longitude": 127.231500, "distance": 120},
-            {"id": "s3", "name": "평내호평역", "full_name": "평내호평역 정류소", "address": "남양주시 늘을2로 20", "latitude": 37.653412, "longitude": 127.244123, "distance": 850},
-            {"id": "s4", "name": "평내동주민센터·남양주소방서", "full_name": "평내동주민센터 버스정류장", "address": "남양주시 평내로 110", "latitude": 37.641500, "longitude": 127.229000, "distance": 320}
-        ]
+    import math
+    def get_dist_meters(lat1, lon1, lat2, lon2):
+        R = 6371000
+        dLat = math.radians(lat2 - lat1)
+        dLon = math.radians(lon2 - lon1)
+        a = math.sin(dLat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dLon/2)**2
+        return int(2 * R * math.asin(math.sqrt(a)))
 
-    set_cached_data(cache_key, stops, ttl_seconds=3600)
-    return stops
+    stops_list = list(stops_dict.values())
+    for s in stops_list:
+        s["distance"] = get_dist_meters(lat, lon, s["latitude"], s["longitude"])
+
+    stops_list.sort(key=lambda x: x["distance"])
+    set_cached_data(cache_key, stops_list, ttl_seconds=3600)
+    return stops_list
 
 async def get_transit_routes():
     cache_key = "transit_routes_real_v4"

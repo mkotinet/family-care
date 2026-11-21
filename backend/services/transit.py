@@ -56,7 +56,7 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1000):
     return stops
 
 async def get_transit_routes():
-    cache_key = "transit_routes_real_v3"
+    cache_key = "transit_routes_real_v4"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
@@ -79,6 +79,7 @@ async def get_transit_routes():
         r_type = r.get("transit_type", "BUS")
         node_id = r.get("station_id") or "GGB222000570"
         route_no = str(r.get("route_no", "100"))
+        st_name = r.get("station_name") or "평내유진아파트"
 
         remain_time = sim["remain_time"]
         remain_stops = sim["remain_stops"]
@@ -122,26 +123,40 @@ async def get_transit_routes():
                 pass
 
         dest_text = r.get("dest_station_name") or r.get("target_destination") or "시내방면"
+
+        # 해당 정류소의 전체 버스 운행 및 실시간 도착 시간 수집
+        station_arrivals_data = await get_station_arrivals(st_name, node_id)
+        all_buses = station_arrivals_data.get("arrivals", [])
+
+        # 만약 즐겨찾기에 등록된 특정 버스가 all_buses에 있다면 해당 정보 우선 동기화
+        for b in all_buses:
+            if b.get("route_no") == route_no:
+                remain_time = b.get("remain_time", remain_time)
+                remain_stops = b.get("remain_stops", remain_stops)
+                badge_color = b.get("badge_color", badge_color)
+                break
+
         results.append({
             "id": r.get("id"),
             "user_username": r.get("user_username") or "가족공용",
             "title": r.get("title") or f"{route_no}번 버스",
             "transit_type": r_type,
             "station_id": node_id,
-            "station_name": r.get("station_name") or "정류장",
+            "station_name": st_name,
             "dest_station_name": dest_text,
             "route_no": route_no,
             "destination": dest_text,
             "remain_time": remain_time,
             "remain_stops": remain_stops,
             "crowded_level": crowded_level,
-            "badge_color": badge_color
+            "badge_color": badge_color,
+            "all_buses": all_buses
         })
 
     if not results:
         results = simulated
 
-    set_cached_data(cache_key, results, ttl_seconds=30)
+    set_cached_data(cache_key, results, ttl_seconds=15)
     return results
 
 # 평내동 주요 버스 노선 데이터베이스 (평내유진마젤란 인근 정류장별 대표 노선)
@@ -216,6 +231,14 @@ async def add_favorite_route(title: str, transit_type: str, station_name: str, r
     INSERT INTO favorite_routes (user_username, title, transit_type, station_name, route_no, target_destination, dest_station_name, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (user_username, title, transit_type, station_name, route_no, target_destination, dest_station_name or target_destination, now_kst))
+    conn.commit()
+    conn.close()
+    return True
+
+async def delete_favorite_route(route_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM favorite_routes WHERE id = ?", (route_id,))
     conn.commit()
     conn.close()
     return True

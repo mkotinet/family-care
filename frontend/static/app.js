@@ -63,7 +63,10 @@ const AppState = {
   transitRouteBuilder: {
     origin: null,               // { name, lat, lon, address }
     destination: null           // { name, lat, lon, address }
-  }
+  },
+  busAlerts: JSON.parse(localStorage.getItem('family_bus_alerts') || '[]'), // 예약된 버스 알림 목록
+  currentAlarmTarget: null,     // 현재 알림 설정 중인 버스 정보
+  busAlertLoopTimer: null
 };
 
 // ==========================================
@@ -91,6 +94,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   setInterval(() => {
     sendUserHeartbeat();
   }, 30000);
+
+  // 버스 도착 알림 감시 루프 초기화 (15초 주기)
+  initBusAlertSystem();
 
   // 자녀 계정일 경우 자동 GPS 위치 추적 리포트 가동
   if (AppState.currentUser && AppState.currentUser.role_type === "CHILD") {
@@ -1308,13 +1314,18 @@ function setTransitDestination(place) {
             <b>${dest.name}</b>
           </div>
         </div>
-        <div style="display: flex; gap: 6px; margin-top: 8px;">
-          <button class="btn-primary" style="flex: 2; padding: 10px 8px; font-size: 12px;" onclick="openRouteModal('${origin.name}', '', '${dest.name}', '${origin.name} ➔ ${dest.name}')">
-            ⭐ 이 버스 루트 즐겨찾기 등록
+        <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 10px;">
+          <button class="btn-primary" style="width: 100%; padding: 12px 10px; font-size: 13px; font-weight: 800; background: linear-gradient(135deg, #0284c7, #0369a1); box-shadow: 0 4px 12px rgba(2, 132, 199, 0.3);" onclick="saveTransitRouteDirect('${origin.name}', '${dest.name}')">
+            ⭐ [${origin.name} ➔ ${dest.name}] 즐겨찾기 즉시 저장
           </button>
-          <button class="btn-secondary" style="flex: 1; padding: 10px 8px; font-size: 12px;" onclick="resetTransitRouteBuilder()">
-            취소
-          </button>
+          <div style="display: flex; gap: 6px;">
+            <button class="btn-secondary" style="flex: 1; padding: 8px; font-size: 11px;" onclick="openRouteModal('${origin.name}', '', '${dest.name}', '${origin.name} ➔ ${dest.name}')">
+              ✏️ 버스 번호 직접 지정
+            </button>
+            <button class="btn-secondary" style="flex: 1; padding: 8px; font-size: 11px;" onclick="resetTransitRouteBuilder()">
+              다시 선택
+            </button>
+          </div>
         </div>
       </div>
     `
@@ -1583,12 +1594,12 @@ function navigateSelectedPlace() {
   window.open(url, "_blank");
 }
 
-// 버스 정류소 핀 클릭 시 실시간 도착 정보 조회 및 카드 렌더링
+// 버스 정류소 핀 클릭 시 실시간 도착 정보 조회 및 자동 출발지/도착지 즐겨찾기 연동
 async function selectBusStopOnMap(stop) {
   const sLat = stop.lat || (AppState.location.lat + 0.001);
   const sLon = stop.lon || (AppState.location.lon - 0.001);
 
-  // 만약 2단계 루트 빌더에서 출발지가 이미 지정된 상태라면 -> 즉시 도착지로 매핑!
+  // 만약 2단계 루트 빌더에서 출발지가 이미 지정된 상태라면 -> 즉시 도착지로 매핑 & 바로 즐겨찾기 저장 뷰 오픈!
   if (AppState.transitRouteBuilder.origin && !AppState.transitRouteBuilder.destination) {
     setTransitDestination({
       name: stop.name,
@@ -1599,6 +1610,14 @@ async function selectBusStopOnMap(stop) {
     return;
   }
 
+  // 출발지가 없는 상태에서 정류장 선택 시 -> 자동으로 출발지로 즉시 세팅 & 지도 안내
+  setTransitOrigin({
+    name: stop.name,
+    lat: sLat,
+    lon: sLon,
+    address: stop.address || `남양주시 평내동 정류소`
+  });
+
   if (AppState.mapEngine === "kakao" && AppState.kakaoCategoryMap) {
     AppState.kakaoCategoryMap.panTo(new kakao.maps.LatLng(sLat, sLon));
   } else if (AppState.leafletCategoryMap) {
@@ -1607,28 +1626,30 @@ async function selectBusStopOnMap(stop) {
 
   openSelectedPlaceCard({
     category: "교통",
-    categoryTitle: "🚏 버스 정류소",
+    categoryTitle: "🚏 출발 정류소 선택됨",
     categoryClass: "transit",
     name: stop.name,
     address: `남양주시 평내동 (집에서 약 ${stop.distance || 120}m)`,
     phone: "",
-    status_info: "실시간 노선 운행 중",
+    status_info: "출발지로 지정됨 · 이제 도착 정류소를 지도에서 터치하세요",
     lat: sLat,
     lon: sLon,
     extraHtml: `
-      <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 10px; padding: 10px; margin-bottom: 8px;">
-        <div style="font-weight: 800; color: #166534; font-size: 12px; margin-bottom: 4px;">🚩 나만의 버스 루트 만들기 (1단계)</div>
-        <div style="font-size: 11px; color: #334155; margin-bottom: 8px;">이 정류소를 출발지로 할까요, 아니면 도착지로 할까요?</div>
+      <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 12px; padding: 12px; margin-bottom: 10px;">
+        <div style="font-weight: 800; color: #166534; font-size: 13px; margin-bottom: 4px;">🚩 출발지: <b>${stop.name}</b></div>
+        <div style="font-size: 11.5px; color: #334155; line-height: 1.4; margin-bottom: 8px;">
+          👉 지도에서 <b>도착할 정류소(또는 위치)</b>를 터치하시면 <b>'출발지 ➔ 도착지'</b> 루트가 자동 생성되어 원클릭으로 즐겨찾기 저장할 수 있습니다.
+        </div>
         <div style="display: flex; gap: 6px;">
-          <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 11px; background: #0284c7;" onclick='setTransitOrigin({ name: "${stop.name}", lat: ${sLat}, lon: ${sLon}, address: "남양주시 평내동 정류소" })'>
-            🚩 출발지로 설정
+          <button class="btn-primary" style="flex: 2; padding: 10px; font-size: 12px; font-weight: 800; background: #0284c7;" onclick="saveTransitRouteDirect('${stop.name}', '시내방면')">
+            ⭐ [${stop.name}] 단독 즐겨찾기 저장
           </button>
-          <button class="btn-secondary" style="flex: 1; padding: 8px; font-size: 11px;" onclick='setTransitOrigin({ name: "평내유진마젤란(우리집)", lat: ${AppState.location.lat}, lon: ${AppState.location.lon}, address: "우리 집" }); setTransitDestination({ name: "${stop.name}", lat: ${sLat}, lon: ${sLon}, address: "남양주시 평내동 정류소" });'>
-            🏁 우리집에서 오는 도착지로 설정
+          <button class="btn-secondary" style="flex: 1; padding: 10px; font-size: 11px;" onclick="resetTransitRouteBuilder()">
+            🔄 초기화
           </button>
         </div>
       </div>
-      <div style="color: #64748b; padding: 4px;">도착 예정 버스 정보 조회 중... 🚌</div>
+      <div style="color: #64748b; padding: 4px; font-size: 12px;">🚏 실시간 도착 예정 버스 조회 중... 🚌</div>
     `
   });
 
@@ -1638,15 +1659,17 @@ async function selectBusStopOnMap(stop) {
     const arrivals = data.arrivals || [];
 
     let extraHtml = `
-      <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 10px; padding: 10px; margin-bottom: 8px;">
-        <div style="font-weight: 800; color: #166534; font-size: 12px; margin-bottom: 4px;">🚩 나만의 버스 루트 만들기 (1단계)</div>
-        <div style="font-size: 11px; color: #334155; margin-bottom: 8px;">이 정류소를 출발지로 할까요, 아니면 도착지로 할까요?</div>
+      <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 12px; padding: 12px; margin-bottom: 10px;">
+        <div style="font-weight: 800; color: #166534; font-size: 13px; margin-bottom: 4px;">🚩 출발지: <b>${stop.name}</b></div>
+        <div style="font-size: 11.5px; color: #334155; line-height: 1.4; margin-bottom: 8px;">
+          👉 지도에서 <b>도착할 정류소</b>를 터치하시면 <b>'출발지 ➔ 도착지'</b> 루트가 자동 완성됩니다!
+        </div>
         <div style="display: flex; gap: 6px;">
-          <button class="btn-primary" style="flex: 1; padding: 8px; font-size: 11px; background: #0284c7;" onclick='setTransitOrigin({ name: "${stop.name}", lat: ${sLat}, lon: ${sLon}, address: "남양주시 평내동 정류소" })'>
-            🚩 출발지로 설정
+          <button class="btn-primary" style="flex: 2; padding: 10px; font-size: 12px; font-weight: 800; background: #0284c7;" onclick="saveTransitRouteDirect('${stop.name}', '시내방면')">
+            ⭐ [${stop.name}] 단독 즐겨찾기 저장
           </button>
-          <button class="btn-secondary" style="flex: 1; padding: 8px; font-size: 11px;" onclick='setTransitOrigin({ name: "평내유진마젤란(우리집)", lat: ${AppState.location.lat}, lon: ${AppState.location.lon}, address: "우리 집" }); setTransitDestination({ name: "${stop.name}", lat: ${sLat}, lon: ${sLon}, address: "남양주시 평내동 정류소" });'>
-            🏁 우리집에서 오는 도착지로 설정
+          <button class="btn-secondary" style="flex: 1; padding: 10px; font-size: 11px;" onclick="resetTransitRouteBuilder()">
+            🔄 초기화
           </button>
         </div>
       </div>
@@ -1654,20 +1677,31 @@ async function selectBusStopOnMap(stop) {
 
     if (arrivals.length > 0) {
       extraHtml += `
-        <div style="font-weight: 800; color: #0369a1; margin-bottom: 6px;">🚌 실시간 도착 예정 버스 (${arrivals.length}대)</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span style="font-weight: 800; color: #0369a1; font-size: 12px;">🚌 실시간 도착 예정 버스 (${arrivals.length}대)</span>
+          <span style="font-size: 11px; color: #64748b;">🔔 터치 시 10/5/3분 알림 예약</span>
+        </div>
         <div class="station-arrival-list">
-          ${arrivals.map(a => `
-            <div class="station-arrival-item">
-              <div>
-                <span class="bus-num-pill" style="background: ${a.badge_color};">${a.route_no}</span>
-                <span style="font-weight: 700; margin-left: 6px; color: #334155;">➔ ${a.destination}</span>
+          ${arrivals.map(a => {
+            const hasAlarm = AppState.busAlerts.some(al => al.routeNo === a.route_no && al.stationName === stop.name);
+            return `
+              <div class="station-arrival-item" style="cursor: pointer;" onclick="openBusAlarmModal({ route_no: '${a.route_no}', station_name: '${stop.name}', destination: '${a.destination}', remain_time: '${a.remain_time}' })">
+                <div>
+                  <span class="bus-num-pill" style="background: ${a.badge_color};">${a.route_no}</span>
+                  <span style="font-weight: 700; margin-left: 6px; color: #334155; font-size: 12px;">➔ ${a.destination}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <div style="text-align: right;">
+                    <div style="font-weight: 800; color: #e11d48; font-size: 12px;">${a.remain_time}</div>
+                    <div style="font-size: 10px; color: #64748b;">${a.remain_stops}</div>
+                  </div>
+                  <button class="btn-alarm-set ${hasAlarm ? 'active' : ''}" onclick="event.stopPropagation(); openBusAlarmModal({ route_no: '${a.route_no}', station_name: '${stop.name}', destination: '${a.destination}', remain_time: '${a.remain_time}' })">
+                    ${hasAlarm ? '🔔 예약됨' : '🔔 알림'}
+                  </button>
+                </div>
               </div>
-              <div style="text-align: right;">
-                <span style="font-weight: 800; color: #e11d48;">${a.remain_time}</span>
-                <span style="font-size: 10px; color: #64748b; margin-left: 4px;">(${a.remain_stops})</span>
-              </div>
-            </div>
-          `).join("")}
+            `;
+          }).join("")}
         </div>
       `;
     } else {
@@ -1677,6 +1711,13 @@ async function selectBusStopOnMap(stop) {
     }
 
     const extraBox = document.getElementById("selPlaceExtraBox");
+    if (extraBox && AppState.selectedPlace && AppState.selectedPlace.name === stop.name) {
+      extraBox.innerHTML = extraHtml;
+    }
+  } catch (e) {
+    console.warn("fetch station arrivals error:", e);
+  }
+}
     if (extraBox && AppState.selectedPlace && AppState.selectedPlace.name === stop.name) {
       extraBox.innerHTML = extraHtml;
     }
@@ -1741,7 +1782,36 @@ async function renderTransitDetail(el) {
   AppState.cachedTransitStops = stops || [];
   AppState.cachedTransitRoutes = routes || [];
 
+  // 1. 현재 활성화된 버스 알림 예약 현황 바
+  let activeAlarmsHtml = "";
+  if (AppState.busAlerts && AppState.busAlerts.length > 0) {
+    activeAlarmsHtml = `
+      <div class="active-bus-alarms-bar">
+        <div class="active-bus-alarms-header">
+          <span>🔔 실시간 도착 알림 대기 중 (${AppState.busAlerts.length}대)</span>
+          <span style="font-size: 10.5px; color: #15803d; font-weight: 700;">10분/5분/3분 전 알림</span>
+        </div>
+        <div class="active-bus-alarms-list">
+          ${AppState.busAlerts.map(al => `
+            <div class="active-bus-alarm-chip">
+              <div>
+                <span class="bus-num-pill" style="font-size: 11px; padding: 2px 7px;">${al.routeNo}번</span>
+                <strong style="margin-left: 4px; color: #334155;">${al.stationName}</strong>
+                <span style="font-size: 10.5px; color: #0284c7; margin-left: 4px;">(${al.stages.join(", ")}분 전)</span>
+              </div>
+              <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:6px; padding:3px 8px; font-size:10.5px; font-weight:700; cursor:pointer;" onclick="removeBusAlarm('${al.id}')">
+                ✕ 해제
+              </button>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
   el.innerHTML = `
+    ${activeAlarmsHtml}
+
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
       <span style="font-size: 13px; font-weight: 800;">📍 내 주변 버스 정류소 (터치 시 실시간 도착 정보)</span>
       <button class="btn-mini btn-fav" onclick="openRouteModal()">+ 새 루트 등록</button>
@@ -1759,20 +1829,58 @@ async function renderTransitDetail(el) {
     <div id="listSelectedStopArrivals" style="margin-bottom: 14px;"></div>
 
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-      <span style="font-size: 13px; font-weight: 800;">🚌 실시간 등록 루트 도착 현황</span>
+      <span style="font-size: 13px; font-weight: 800;">🚌 내 즐겨찾기 구간 및 운행 버스 시간표</span>
       <span style="font-size: 11px; color: #0284c7; font-weight: 700;">상단 🗺️ 지도 탭에서도 정류소 선택 가능</span>
     </div>
-    <div style="display: flex; flex-direction: column; gap: 8px;">
-      ${routes.map(r => `
-        <div class="item-card">
-          <div class="item-card-top">
-            <span class="item-name">${r.title} (${r.route_no})</span>
-            <span class="item-badge" style="background: ${r.badge_color}; color: white;">${r.remain_time}</span>
+    
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      ${routes.map(r => {
+        const allBuses = r.all_buses || [];
+        return `
+          <div class="item-card" style="padding: 12px;">
+            <div class="item-card-top" style="align-items: center;">
+              <div>
+                <span class="item-name" style="font-size: 13px; color: #0f172a;">${r.title || (r.station_name + ' ➔ ' + (r.dest_station_name || r.destination))}</span>
+                <div class="item-desc" style="margin-top: 2px;">📍 ${r.station_name} ➔ ${r.dest_station_name || r.destination || '시내방면'}</div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="item-badge" style="background: ${r.badge_color}; color: white;">${r.remain_time}</span>
+                <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:6px; padding:3px 7px; font-size:11px; cursor:pointer;" title="즐겨찾기 삭제" onclick="deleteTransitRoute(${r.id})">🗑️</button>
+              </div>
+            </div>
+
+            <!-- 구간 내 운행 버스 전체 실시간 시간표 -->
+            <div class="route-all-buses-box">
+              <div class="route-all-buses-header">
+                <span>🚌 이 구간 운행 버스 전체 시간표 (${allBuses.length}대)</span>
+                <span style="font-size: 10px; color: #0284c7;">🔔 터치 시 10/5/3분 도착 알림</span>
+              </div>
+              ${allBuses.length > 0 ? allBuses.map(b => {
+                const hasAlarm = AppState.busAlerts.some(al => al.routeNo === b.route_no && al.stationName === r.station_name);
+                return `
+                  <div class="bus-row-item">
+                    <div class="bus-row-left">
+                      <span class="bus-num-pill" style="background: ${b.badge_color}; font-size: 11px;">${b.route_no}</span>
+                      <div>
+                        <div style="font-weight: 700; font-size: 11.5px; color: #334155;">➔ ${b.destination}</div>
+                        <div style="font-size: 10px; color: #64748b;">${b.type_desc || '일반'} · ${b.remain_stops}</div>
+                      </div>
+                    </div>
+                    <div class="bus-row-right">
+                      <span style="font-weight: 800; color: #e11d48; font-size: 12px;">${b.remain_time}</span>
+                      <button class="btn-alarm-set ${hasAlarm ? 'active' : ''}" onclick="openBusAlarmModal({ route_no: '${b.route_no}', station_name: '${r.station_name}', destination: '${b.destination}', remain_time: '${b.remain_time}' })">
+                        ${hasAlarm ? '🔔 예약됨' : '🔔 알림'}
+                      </button>
+                    </div>
+                  </div>
+                `;
+              }).join("") : `
+                <div style="font-size: 11px; color: #64748b; padding: 6px;">현재 운행 중인 다른 노선 버스가 없습니다.</div>
+              `}
+            </div>
           </div>
-          <div class="item-desc">📍 ${r.station_name} ➔ ${r.destination}</div>
-          <div style="font-size: 11px; color: #0284c7; font-weight: 700;">${r.remain_stops}</div>
-        </div>
-      `).join("")}
+        `;
+      }).join("")}
     </div>
   `;
 }
@@ -1801,18 +1909,26 @@ async function selectBusStopFromList(stationName) {
             <button class="btn-mini btn-fav" onclick="selectStartStation('${stationName}')">+ 이 정류소로 새 루트 등록</button>
           </div>
           <div class="station-arrival-list">
-            ${arrivals.map(a => `
-              <div class="station-arrival-item">
-                <div>
-                  <span class="bus-num-pill" style="background: ${a.badge_color};">${a.route_no}</span>
-                  <span style="font-weight: 700; margin-left: 6px; color: #334155;">➔ ${a.destination}</span>
+            ${arrivals.map(a => {
+              const hasAlarm = AppState.busAlerts.some(al => al.routeNo === a.route_no && al.stationName === stationName);
+              return `
+                <div class="station-arrival-item" style="cursor: pointer;" onclick="openBusAlarmModal({ route_no: '${a.route_no}', station_name: '${stationName}', destination: '${a.destination}', remain_time: '${a.remain_time}' })">
+                  <div>
+                    <span class="bus-num-pill" style="background: ${a.badge_color};">${a.route_no}</span>
+                    <span style="font-weight: 700; margin-left: 6px; color: #334155;">➔ ${a.destination}</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="text-align: right;">
+                      <span style="font-weight: 800; color: #e11d48;">${a.remain_time}</span>
+                      <span style="font-size: 10px; color: #64748b; margin-left: 4px;">(${a.remain_stops})</span>
+                    </div>
+                    <button class="btn-alarm-set ${hasAlarm ? 'active' : ''}" onclick="event.stopPropagation(); openBusAlarmModal({ route_no: '${a.route_no}', station_name: '${stationName}', destination: '${a.destination}', remain_time: '${a.remain_time}' })">
+                      ${hasAlarm ? '🔔 예약됨' : '🔔 알림'}
+                    </button>
+                  </div>
                 </div>
-                <div style="text-align: right;">
-                  <span style="font-weight: 800; color: #e11d48;">${a.remain_time}</span>
-                  <span style="font-size: 10px; color: #64748b; margin-left: 4px;">(${a.remain_stops})</span>
-                </div>
-              </div>
-            `).join("")}
+              `;
+            }).join("")}
           </div>
         </div>
       `;
@@ -2813,6 +2929,272 @@ async function saveTransitRoute() {
     alert("🚌 새 교통 루트가 즐겨찾기에 등록되었습니다!");
     loadFavorites();
   } catch (e) {}
+}
+
+// 번거로운 입력창 없이 출발지 ➔ 도착지 선택 시 즉시 즐겨찾기 원클릭 저장
+async function saveTransitRouteDirect(originName, destName, routeNo = "전체노선") {
+  if (!originName || !destName) return;
+
+  const title = `${originName} ➔ ${destName}`;
+  try {
+    const res = await fetch("/api/transit/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title,
+        transit_type: "BUS",
+        station_name: originName,
+        dest_station_name: destName,
+        route_no: routeNo,
+        target_destination: destName,
+        user_username: AppState.currentUser ? AppState.currentUser.username : "미니미니"
+      })
+    });
+
+    playBusAlertChime();
+    showToast(`⭐ '${title}' 구간이 즐겨찾기에 즉시 저장되었습니다!`, "info");
+
+    resetTransitRouteBuilder();
+    closeSelectedPlaceCard();
+    loadFavorites();
+
+    if (AppState.currentCategory === "transit") {
+      const el = document.getElementById("categoryDetailContent");
+      if (el) renderTransitDetail(el);
+    }
+  } catch (e) {
+    alert("즐겨찾기 저장 중 오류가 발생했습니다.");
+  }
+}
+
+// 즐겨찾기 루트 삭제
+async function deleteTransitRoute(routeId) {
+  if (!confirm("이 버스 즐겨찾기 구간을 삭제하시겠습니까?")) return;
+  try {
+    await fetch(`/api/transit/${routeId}`, { method: "DELETE" });
+    showToast("🗑️ 즐겨찾기 구간이 삭제되었습니다.", "info");
+    loadFavorites();
+    if (AppState.currentCategory === "transit") {
+      const el = document.getElementById("categoryDetailContent");
+      if (el) renderTransitDetail(el);
+    }
+  } catch (e) {
+    alert("삭제 중 오류가 발생했습니다.");
+  }
+}
+
+// ==========================================
+// 8-1. 버스 도착 10분/5분/3분 알림 시스템 (Web Notification + Audio 차임벨 + 진동)
+// ==========================================
+function initBusAlertSystem() {
+  if (AppState.busAlertLoopTimer) clearInterval(AppState.busAlertLoopTimer);
+  checkBusArrivalAlerts();
+  AppState.busAlertLoopTimer = setInterval(() => {
+    checkBusArrivalAlerts();
+  }, 15000);
+}
+
+function playBusAlertChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6 (맑은 3화음 차임벨)
+    notes.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      const startT = ctx.currentTime + idx * 0.12;
+      gain.gain.setValueAtTime(0.2, startT);
+      gain.gain.exponentialRampToValueAtTime(0.001, startT + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startT);
+      osc.stop(startT + 0.4);
+    });
+  } catch (e) {
+    console.warn("Audio chime error:", e);
+  }
+}
+
+function openBusAlarmModal(busData) {
+  AppState.currentAlarmTarget = busData;
+  const modal = document.getElementById("modalBusAlarm");
+  if (!modal) return;
+
+  const noEl = document.getElementById("alarmModalBusNo");
+  const timeEl = document.getElementById("alarmModalRemainTime");
+  const stEl = document.getElementById("alarmModalStationInfo");
+
+  if (noEl) noEl.innerText = `${busData.route_no}번`;
+  if (timeEl) timeEl.innerText = busData.remain_time || "운행 중";
+  if (stEl) stEl.innerText = `🚏 ${busData.station_name || "정류소"} ➔ ${busData.destination || "시내방면"}`;
+
+  const existing = AppState.busAlerts.find(a => a.routeNo === busData.route_no && a.stationName === busData.station_name);
+  const stages = existing ? existing.stages : [10, 5, 3];
+
+  const chk10 = document.getElementById("chkAlarm10");
+  const chk5 = document.getElementById("chkAlarm5");
+  const chk3 = document.getElementById("chkAlarm3");
+  const chk1 = document.getElementById("chkAlarm1");
+
+  if (chk10) chk10.checked = stages.includes(10);
+  if (chk5) chk5.checked = stages.includes(5);
+  if (chk3) chk3.checked = stages.includes(3);
+  if (chk1) chk1.checked = stages.includes(1);
+
+  modal.className = "modal-overlay active";
+
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
+  }
+}
+
+function closeBusAlarmModal(event) {
+  if (event && event.target && event.target.id !== "modalBusAlarm" && !event.target.classList.contains("sheet-close-btn") && event.target.tagName !== "BUTTON") {
+    return;
+  }
+  const modal = document.getElementById("modalBusAlarm");
+  if (modal) modal.className = "modal-overlay";
+  AppState.currentAlarmTarget = null;
+}
+
+function saveBusAlarmSetting() {
+  if (!AppState.currentAlarmTarget) return;
+
+  const target = AppState.currentAlarmTarget;
+  const stages = [];
+  if (document.getElementById("chkAlarm10")?.checked) stages.push(10);
+  if (document.getElementById("chkAlarm5")?.checked) stages.push(5);
+  if (document.getElementById("chkAlarm3")?.checked) stages.push(3);
+  if (document.getElementById("chkAlarm1")?.checked) stages.push(1);
+
+  if (stages.length === 0) {
+    alert("알림을 받을 시간을 최소 1개 이상 선택해 주세요. (예: 5분 전, 3분 전)");
+    return;
+  }
+
+  AppState.busAlerts = AppState.busAlerts.filter(a => !(a.routeNo === target.route_no && a.stationName === target.station_name));
+
+  const newAlert = {
+    id: "alert_" + Date.now(),
+    routeNo: target.route_no,
+    stationName: target.station_name || "정류소",
+    destination: target.destination || "시내방면",
+    stages: stages.sort((a, b) => b - a),
+    notifiedStages: [],
+    createdAt: new Date().toISOString()
+  };
+
+  AppState.busAlerts.push(newAlert);
+  localStorage.setItem("family_bus_alerts", JSON.stringify(AppState.busAlerts));
+
+  closeBusAlarmModal();
+  playBusAlertChime();
+  showToast(`🔔 [${target.route_no}번 버스] ${stages.join("분, ")}분 전 도착 알림이 예약되었습니다!`, "info");
+
+  if (AppState.currentCategory === "transit") {
+    const el = document.getElementById("categoryDetailContent");
+    if (el) renderTransitDetail(el);
+  }
+}
+
+function removeBusAlarm(alertId) {
+  AppState.busAlerts = AppState.busAlerts.filter(a => a.id !== alertId);
+  localStorage.setItem("family_bus_alerts", JSON.stringify(AppState.busAlerts));
+  showToast("🔕 버스 도착 알림 예약이 해제되었습니다.", "info");
+
+  if (AppState.currentCategory === "transit") {
+    const el = document.getElementById("categoryDetailContent");
+    if (el) renderTransitDetail(el);
+  }
+}
+
+async function checkBusArrivalAlerts() {
+  if (!AppState.busAlerts || AppState.busAlerts.length === 0) return;
+
+  const stations = [...new Set(AppState.busAlerts.map(a => a.stationName))];
+
+  for (const stName of stations) {
+    try {
+      const res = await fetch(`/api/transit/station-arrivals?station_name=${encodeURIComponent(stName)}`);
+      const data = await res.json();
+      const arrivals = data.arrivals || [];
+
+      for (const alertItem of AppState.busAlerts.filter(a => a.stationName === stName)) {
+        const matched = arrivals.find(b => b.route_no === alertItem.routeNo);
+        if (!matched) continue;
+
+        const matchDigits = (matched.remain_time || "").match(/\d+/);
+        const minsLeft = matchDigits ? parseInt(matchDigits[0], 10) : 0;
+
+        for (const stage of alertItem.stages) {
+          if (minsLeft <= stage && !alertItem.notifiedStages.includes(stage)) {
+            triggerBusArrivalNotification(alertItem, stage, minsLeft, matched);
+            alertItem.notifiedStages.push(stage);
+            localStorage.setItem("family_bus_alerts", JSON.stringify(AppState.busAlerts));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("checkBusArrivalAlerts error:", e);
+    }
+  }
+
+  const now = Date.now();
+  AppState.busAlerts = AppState.busAlerts.filter(a => {
+    const ageMins = (now - new Date(a.createdAt).getTime()) / (1000 * 60);
+    return ageMins < 35;
+  });
+  localStorage.setItem("family_bus_alerts", JSON.stringify(AppState.busAlerts));
+}
+
+function triggerBusArrivalNotification(alertItem, stage, minsLeft, matchedBus) {
+  const title = `🚌 [${alertItem.routeNo}번 버스] 도착 ${stage}분 전!`;
+  const body = `🚏 ${alertItem.stationName}에 약 ${minsLeft}분 후 도착합니다! (${matchedBus.remain_stops || "운행 중"})\n지금 정류장으로 이동하세요!`;
+
+  playBusAlertChime();
+
+  if ("vibrate" in navigator) {
+    navigator.vibrate([200, 100, 200, 100, 300]);
+  }
+
+  const banner = document.getElementById("busArrivalFloatingBanner");
+  const bannerTitle = document.getElementById("busAlertBannerTitle");
+  const bannerDesc = document.getElementById("busAlertBannerDesc");
+  if (banner && bannerTitle && bannerDesc) {
+    bannerTitle.innerText = title;
+    bannerDesc.innerText = body.replace("\n", " ");
+    banner.style.display = "flex";
+    setTimeout(() => {
+      banner.style.display = "none";
+    }, 8000);
+  }
+
+  if ("Notification" in window && Notification.permission === "granted") {
+    try {
+      new Notification(title, {
+        body: body,
+        icon: "/static/icons/icon-192.png",
+        badge: "/static/icons/icon-192.png",
+        tag: `bus_${alertItem.routeNo}_${stage}`,
+        renotify: true
+      });
+    } catch (e) {
+      if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+        navigator.serviceWorker.ready.then(reg => {
+          reg.showNotification(title, {
+            body: body,
+            icon: "/static/icons/icon-192.png",
+            tag: `bus_${alertItem.routeNo}_${stage}`
+          });
+        });
+      }
+    }
+  }
+
+  showToast(title + " - " + body.replace("\n", " "), "info");
 }
 
 function refreshMyLocation() {

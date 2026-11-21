@@ -1597,3 +1597,178 @@ body {
   to { opacity: 1; }
 }
 
+/* ========================================================
+   12. 버스 도착 10분/5분/3분 알림 & 전체 버스 타임테이블 UI
+   ======================================================== */
+.bus-alert-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 24px);
+  max-width: 480px;
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  color: white;
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 10px 25px rgba(2, 132, 199, 0.4);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  animation: slideDown 0.3s ease-out;
+  cursor: pointer;
+}
+
+.bus-alert-banner .banner-icon {
+  font-size: 26px;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 6px;
+  border-radius: 12px;
+}
+
+.bus-alert-banner .banner-content {
+  flex: 1;
+}
+
+.bus-alert-banner .banner-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+}
+
+.bus-alert-banner .banner-desc {
+  font-size: 11.5px;
+  opacity: 0.95;
+  margin-top: 2px;
+}
+
+.bus-alert-banner .banner-close {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  font-size: 14px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 상단 알림 예약 현황 바 */
+.active-bus-alarms-bar {
+  background: #f0fdf4;
+  border: 1.5px solid #86efac;
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  animation: fadeIn 0.2s;
+}
+
+.active-bus-alarms-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #166534;
+  margin-bottom: 6px;
+}
+
+.active-bus-alarms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.active-bus-alarm-chip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: white;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11.5px;
+}
+
+/* 즐겨찾기 구간 내 전체 버스 타임테이블 */
+.route-all-buses-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  margin-top: 8px;
+}
+
+.route-all-buses-header {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #475569;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.bus-row-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: white;
+  border: 1px solid #f1f5f9;
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin-bottom: 5px;
+  transition: all 0.15s;
+}
+
+.bus-row-item:last-child {
+  margin-bottom: 0;
+}
+
+.bus-row-item:active {
+  background: #f0f9ff;
+}
+
+.bus-row-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bus-row-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-alarm-set {
+  border: none;
+  background: #f1f5f9;
+  color: #0284c7;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.btn-alarm-set:hover, .btn-alarm-set:active {
+  background: #0284c7;
+  color: white;
+}
+
+.btn-alarm-set.active {
+  background: #0284c7;
+  color: white;
+  box-shadow: 0 2px 6px rgba(2, 132, 199, 0.3);
+}
+
+

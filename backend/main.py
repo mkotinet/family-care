@@ -15,7 +15,7 @@ from backend.services.location import update_user_location, get_family_locations
 from backend.services.chat import get_chat_rooms, get_messages, send_message
 from backend.services.places import add_favorite_place, get_favorite_places, remove_favorite_place
 from backend.services.weather import get_weather_data
-from backend.services.transit import get_transit_routes, add_favorite_route, search_nearby_bus_stops, get_station_arrivals
+from backend.services.transit import get_transit_routes, add_favorite_route, delete_favorite_route, search_nearby_bus_stops, get_station_arrivals
 from backend.services.hospital import get_hospital_pharmacy_info
 from backend.services.restaurant import get_favorite_restaurants, add_favorite_restaurant, search_places_kakao
 from backend.services.health import get_health_alerts
@@ -318,6 +318,11 @@ async def api_transit_add(payload: dict = Body(...)):
         user_username=payload.get("user_username", "미니미니")
     )
     return {"success": True}
+
+@app.delete("/api/transit/{route_id}")
+async def api_transit_delete(route_id: int):
+    res = await delete_favorite_route(route_id)
+    return {"success": res}
 
 # --- 7. 병원 & 당번약국 ---
 @app.get("/api/hospital")

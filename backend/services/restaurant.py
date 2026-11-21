@@ -52,6 +52,42 @@ async def add_favorite_restaurant(name: str, category: str, phone: str, address:
     conn.close()
     return True
 
+async def delete_favorite_restaurant(restaurant_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM favorite_restaurants WHERE id = ?", (restaurant_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+async def update_favorite_restaurant(restaurant_id: int, name: str = None, category: str = None, phone: str = None, address: str = None, family_note: str = None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    updates = []
+    params = []
+    if name is not None:
+        updates.append("name = ?")
+        params.append(name)
+    if category is not None:
+        updates.append("category = ?")
+        params.append(category)
+    if phone is not None:
+        updates.append("phone = ?")
+        params.append(phone)
+    if address is not None:
+        updates.append("address = ?")
+        params.append(address)
+    if family_note is not None:
+        updates.append("family_note = ?")
+        params.append(family_note)
+    if updates:
+        params.append(restaurant_id)
+        sql = f"UPDATE favorite_restaurants SET {', '.join(updates)} WHERE id = ?"
+        cursor.execute(sql, tuple(params))
+        conn.commit()
+    conn.close()
+    return True
+
 async def search_places_kakao(query: str = "맛집", lat: float = 37.6434558, lon: float = 127.2311716, radius: int = 4000):
     clean_q = (query or "맛집").strip()
     cache_key = f"kakao_places_{clean_q}_{round(lat, 3)}_{round(lon, 3)}"

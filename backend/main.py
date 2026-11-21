@@ -17,7 +17,7 @@ from backend.services.places import add_favorite_place, get_favorite_places, rem
 from backend.services.weather import get_weather_data
 from backend.services.transit import get_transit_routes, add_favorite_route, delete_favorite_route, update_favorite_route, search_nearby_bus_stops, get_station_arrivals
 from backend.services.hospital import get_hospital_pharmacy_info
-from backend.services.restaurant import get_favorite_restaurants, add_favorite_restaurant, search_places_kakao
+from backend.services.restaurant import get_favorite_restaurants, add_favorite_restaurant, delete_favorite_restaurant, update_favorite_restaurant, search_places_kakao
 from backend.services.health import get_health_alerts
 from backend.services.culture import get_culture_and_crowd
 
@@ -359,6 +359,23 @@ async def api_hospital(lat: float = Query(None), lon: float = Query(None), filte
 async def api_restaurant():
     data = await get_favorite_restaurants()
     return data
+
+@app.delete("/api/restaurant/{restaurant_id}")
+async def api_restaurant_delete(restaurant_id: int):
+    res = await delete_favorite_restaurant(restaurant_id)
+    return {"success": res}
+
+@app.put("/api/restaurant/{restaurant_id}")
+async def api_restaurant_update(restaurant_id: int, payload: dict = Body(...)):
+    res = await update_favorite_restaurant(
+        restaurant_id=restaurant_id,
+        name=payload.get("name"),
+        category=payload.get("category"),
+        phone=payload.get("phone"),
+        address=payload.get("address"),
+        family_note=payload.get("memo") or payload.get("family_note")
+    )
+    return {"success": res}
 
 @app.get("/api/restaurant/search")
 async def api_restaurant_search(query: str = Query(...), lat: float = Query(None), lon: float = Query(None)):

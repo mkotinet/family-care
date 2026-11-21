@@ -10,7 +10,7 @@ from backend.mock_data import get_simulated_transit
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
 async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
-    cache_key = f"bus_stops_v3_{round(lat, 3)}_{round(lon, 3)}"
+    cache_key = f"bus_stops_v5_{round(lat, 3)}_{round(lon, 3)}"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
@@ -207,6 +207,8 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
 
     stops_list = list(stops_dict.values())
     for s in stops_list:
+        s["lat"] = float(s["latitude"])
+        s["lon"] = float(s["longitude"])
         s["distance"] = get_dist_meters(lat, lon, s["latitude"], s["longitude"])
 
     stops_list.sort(key=lambda x: x["distance"])

@@ -23,12 +23,12 @@
           오늘도 건강하고 안전한 하루 보내세요!
         </div>
       </div>
-      <div id="kstClock" style="font-size: 13px; font-weight: 800; color: #0284c7; background: #e0f2fe; padding: 4px 10px; border-radius: 999px;">
+      <div class="kst-pill" id="kstClock">
         --:-- KST
       </div>
     </header>
 
-    <!-- 2. 위치 & 오늘 날짜 바 -->
+    <!-- 2. 위치 바 -->
     <div class="location-bar">
       <div class="loc-badge">
         <span>📍</span>
@@ -47,21 +47,14 @@
       <button class="member-tab" data-member="3">👧 우리 아이 (등교)</button>
     </div>
 
-    <!-- 4. [카드 1] 날씨 & 옷차림 & 우산 알림 (모닝 브리핑) -->
-    <section class="glass-card" id="cardWeather">
-      <div class="card-header">
-        <div class="card-title">
-          <span>☀️</span> 오늘의 날씨 & 옷차림
-        </div>
-        <span style="font-size: 11px; color: #64748b;" id="weatherUpdated">조회중...</span>
-      </div>
-
-      <div class="weather-hero">
+    <!-- 4. [초기화면] 기본 날씨 & 옷차림 요약 카드 -->
+    <section class="weather-summary-card" id="homeWeatherSummary">
+      <div class="weather-header-row">
         <div>
-          <div class="temp-large" id="currentTemp">--.-℃</div>
-          <div class="temp-sub" id="tempRange">최저 --℃ / 최고 --℃ (체감 --℃)</div>
+          <div class="weather-temp-main" id="currentTemp">--.-℃</div>
+          <div class="weather-temp-sub" id="tempRange">최저 --℃ / 최고 --℃ (체감 --℃)</div>
         </div>
-        <div style="font-size: 48px;" id="weatherIcon">🌤️</div>
+        <div class="weather-icon-large" id="weatherIcon">🌤️</div>
       </div>
 
       <div class="weather-badge-group">
@@ -70,103 +63,136 @@
         <span class="badge badge-umbrella-no" id="badgeUmbrella">☂️ 우산 불필요</span>
       </div>
 
-      <div class="outfit-box">
-        <div class="outfit-icon" id="outfitIcon">🧥</div>
-        <div class="outfit-text" id="outfitText">
-          기온 정보를 불러와 맞춤 옷차림을 분석하고 있어요.
+      <div class="outfit-banner">
+        <div class="icon" id="outfitIcon">🧥</div>
+        <div class="text" id="outfitText">
+          기온 정보를 분석하여 오늘 맞춤 옷차림을 준비 중입니다.
         </div>
       </div>
     </section>
 
-    <!-- 5. [카드 2] 나만의 실시간 교통 루트 (버스/지하철) -->
-    <section class="glass-card" id="cardTransit">
-      <div class="card-header">
-        <div class="card-title">
-          <span>🚌</span> 나만의 실시간 교통 루트
+    <!-- 5. [초기화면] 내가 등록한 즐겨찾기 퀵뷰 (교통 + 단골식당) -->
+    <section class="favorites-section">
+      <div class="section-title-row">
+        <div class="section-title">
+          <span>⭐</span> 우리 가족 즐겨찾기
         </div>
-        <button class="card-action-btn" id="btnOpenAddRoute">
-          + 루트 추가
-        </button>
+        <span class="section-sub-action" id="btnQuickAddRoute">+ 새 루트 등록</span>
       </div>
-      <div id="transitList">
-        <!-- 동적 렌더링 -->
-        <div style="padding: 20px; text-align: center; color: #94a3b8;">
-          실시간 도착 정보를 조회하고 있습니다...
+      <div class="favorites-scroll-container" id="favoritesQuickList">
+        <!-- 즐겨찾기 실시간 미니 카드 동적 렌더링 -->
+        <div style="padding: 16px; color: #94a3b8; font-size: 13px;">
+          즐겨찾기 항목을 불러오는 중...
         </div>
       </div>
     </section>
 
-    <!-- 6. [카드 3] 건강 & 긴급 의료 레이더 (휴일/주말 병원 & 당번약국) -->
-    <section class="glass-card" id="cardHospital">
-      <div class="card-header">
-        <div class="card-title">
-          <span>🏥</span> 우리동네 병원 & 당번약국
+    <!-- 6. [초기화면] 핵심 카테고리 카드 그리드 -->
+    <section class="category-section">
+      <div class="section-title-row">
+        <div class="section-title">
+          <span>🗂️</span> 카테고리별 상세 정보
         </div>
-        <span style="font-size: 12px; font-weight: 700; color: #10b981;" id="hospitalWeekendBadge">
-          주말/휴일 정상운영 확인
-        </span>
+        <span style="font-size: 11px; color: #64748b; font-weight: 600;">카드를 누르면 상세 내용 열람</span>
       </div>
 
-      <!-- 필터 칩 -->
-      <div class="filter-chips">
-        <button class="chip active" data-filter="ALL">전체 보기</button>
-        <button class="chip" data-filter="PHARMACY">💊 당번약국</button>
-        <button class="chip" data-filter="CHILDREN">👶 달빛어린이병원/소아과</button>
-        <button class="chip" data-filter="OPEN_NOW">🟢 지금 문 연 곳</button>
-      </div>
+      <div class="category-grid">
+        <!-- 1) 실시간 교통 -->
+        <div class="cat-card cat-transit" onclick="openCategoryDetail('transit')">
+          <div class="cat-top">
+            <span class="cat-icon">🚌</span>
+            <span class="cat-arrow">➔</span>
+          </div>
+          <div>
+            <div class="cat-name">실시간 교통</div>
+            <div class="cat-preview" id="catPreviewTransit">M2323, 165번 외 도착 대기</div>
+            <span class="cat-tag" style="background: #e0f2fe; color: #0369a1;">도착 알림</span>
+          </div>
+        </div>
 
-      <div id="hospitalList">
-        <div style="padding: 20px; text-align: center; color: #94a3b8;">
-          의료기관 정보를 불러오는 중입니다...
+        <!-- 2) 병원 & 당번약국 -->
+        <div class="cat-card cat-hospital" onclick="openCategoryDetail('hospital')">
+          <div class="cat-top">
+            <span class="cat-icon">🏥</span>
+            <span class="cat-arrow">➔</span>
+          </div>
+          <div>
+            <div class="cat-name">병원 & 당번약국</div>
+            <div class="cat-preview" id="catPreviewHospital">소아과/달빛병원, 주말 약국</div>
+            <span class="cat-tag" style="background: #d1fae5; color: #065f46;">주말/야간</span>
+          </div>
+        </div>
+
+        <!-- 3) 단골 식당 & 외식 -->
+        <div class="cat-card cat-restaurant" onclick="openCategoryDetail('restaurant')">
+          <div class="cat-top">
+            <span class="cat-icon">🍽️</span>
+            <span class="cat-arrow">➔</span>
+          </div>
+          <div>
+            <div class="cat-name">단골 식당 & 외식</div>
+            <div class="cat-preview" id="catPreviewRestaurant">주말 영업시간, 마감 확인</div>
+            <span class="cat-tag" style="background: #ffedd5; color: #c2410c;">가족 단골</span>
+          </div>
+        </div>
+
+        <!-- 4) 질병 & 알레르기 -->
+        <div class="cat-card cat-health" onclick="openCategoryDetail('health')">
+          <div class="cat-top">
+            <span class="cat-icon">🩺</span>
+            <span class="cat-arrow">➔</span>
+          </div>
+          <div>
+            <div class="cat-name">질병 & 알레르기</div>
+            <div class="cat-preview" id="catPreviewHealth">꽃가루 지수, 감기 위험도</div>
+            <span class="cat-tag" style="background: #ede9fe; color: #6d28d9;">건강 예보</span>
+          </div>
+        </div>
+
+        <!-- 5) 주말 나들이 & 축제 -->
+        <div class="cat-card cat-culture" onclick="openCategoryDetail('culture')">
+          <div class="cat-top">
+            <span class="cat-icon">🎪</span>
+            <span class="cat-arrow">➔</span>
+          </div>
+          <div>
+            <div class="cat-name">주말 나들이 & 축제</div>
+            <div class="cat-preview" id="catPreviewCulture">우리동네 축제, 붐빔 신호등</div>
+            <span class="cat-tag" style="background: #fef3c7; color: #b45309;">혼잡도 예측</span>
+          </div>
+        </div>
+
+        <!-- 6) 가족 맞춤 관리 -->
+        <div class="cat-card cat-manage" onclick="openCategoryDetail('manage')">
+          <div class="cat-top">
+            <span class="cat-icon">⚙️</span>
+            <span class="cat-arrow">➔</span>
+          </div>
+          <div>
+            <div class="cat-name">즐겨찾기 관리</div>
+            <div class="cat-preview">루트 추가, 단골 식당 등록</div>
+            <span class="cat-tag" style="background: #f1f5f9; color: #475569;">맞춤 설정</span>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- 7. [카드 4] 우리 가족 단골 식당 & 주말 영업시간 -->
-    <section class="glass-card" id="cardRestaurant">
-      <div class="card-header">
-        <div class="card-title">
-          <span>🍽️</span> 우리 가족 단골 식당 & 주말 외식
-        </div>
-        <button class="card-action-btn" id="btnOpenAddRestaurant">
-          + 단골 등록
-        </button>
-      </div>
-      <div id="restaurantList">
-        <div style="padding: 20px; text-align: center; color: #94a3b8;">
-          단골 식당 영업시간을 불러오는 중입니다...
-        </div>
-      </div>
-    </section>
+  </div>
 
-    <!-- 8. [카드 5] 알레르기 & 감염병 유행 예보 -->
-    <section class="glass-card" id="cardHealthAlert">
-      <div class="card-header">
-        <div class="card-title">
-          <span>🩺</span> 질병 & 꽃가루 알레르기 예보
+  <!-- 7. 카테고리 상세 바텀 시트 (Bottom Sheet) -->
+  <div class="detail-sheet-backdrop" id="sheetBackdrop" onclick="closeCategoryDetail(event)">
+    <div class="detail-sheet" id="sheetContainer" onclick="event.stopPropagation()">
+      <div class="sheet-handle-bar"></div>
+      <div class="sheet-header">
+        <div class="sheet-title" id="sheetTitle">
+          <span>카테고리 상세</span>
         </div>
+        <button class="sheet-close-btn" onclick="closeCategoryDetail()">✕</button>
       </div>
-      <div id="healthAlertList">
-        <div style="padding: 20px; text-align: center; color: #94a3b8;">
-          보건기상지수를 확인 중입니다...
-        </div>
+      <div class="sheet-content" id="sheetContent">
+        <!-- 카테고리 클릭 시 상세 내용이 동적으로 주입됨 -->
       </div>
-    </section>
-
-    <!-- 9. [카드 6] 주말 나들이 & 축제 / 붐빔(혼잡도) 신호등 -->
-    <section class="glass-card" id="cardCulture">
-      <div class="card-header">
-        <div class="card-title">
-          <span>🎪</span> 주말 나들이 & 실시간 붐빔 신호등
-        </div>
-      </div>
-      <div id="cultureList">
-        <div style="padding: 20px; text-align: center; color: #94a3b8;">
-          지역 행사 및 혼잡도를 조회 중입니다...
-        </div>
-      </div>
-    </section>
-
+    </div>
   </div>
 
   <!-- 모달: 새 교통 루트 추가 -->
@@ -205,30 +231,6 @@
       </div>
     </div>
   </div>
-
-  <!-- 하단 고정 모바일 퀵 내비게이션 바 -->
-  <nav class="bottom-nav">
-    <button class="nav-item active" onclick="scrollToCard('cardWeather')">
-      <span>☀️</span>
-      오늘날씨
-    </button>
-    <button class="nav-item" onclick="scrollToCard('cardTransit')">
-      <span>🚌</span>
-      교통루트
-    </button>
-    <button class="nav-item" onclick="scrollToCard('cardHospital')">
-      <span>🏥</span>
-      병원약국
-    </button>
-    <button class="nav-item" onclick="scrollToCard('cardRestaurant')">
-      <span>🍽️</span>
-      단골식당
-    </button>
-    <button class="nav-item" onclick="scrollToCard('cardCulture')">
-      <span>🎪</span>
-      주말나들이
-    </button>
-  </nav>
 
   <script src="/static/app.js"></script>
 </body>

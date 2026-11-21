@@ -1,6 +1,6 @@
 /**
- * 우리가족챙기기 (Family Care) - Frontend App Engine
- * 모바일 최적화, KST 일관 적용, BFCache 대응, 독립 비동기 위젯 로딩
+ * 우리가족챙기기 (Family Care) - Frontend App Engine v2
+ * 카테고리 허브 & 즐겨찾기 퀵뷰 & 바텀 시트 상세 뷰어
  */
 
 // 전역 상태
@@ -10,76 +10,74 @@ const state = {
   address: "경기도 남양주시 평내동 평내유진마젤란",
   activeMember: 0, // 0: 전체, 1: 아빠, 2: 엄마, 3: 아이
   lastDateStr: "",
-  isWeekend: false
+  isWeekend: false,
+  cachedData: {
+    weather: null,
+    transit: [],
+    hospital: null,
+    restaurant: [],
+    health: null,
+    culture: null
+  }
 };
 
-// KST 날짜 헬퍼 (공통 개발 지침 준수)
+// KST 날짜/시간 포맷터
 function getKSTDateString(date = new Date()) {
-  const formatter = new Intl.DateTimeFormat("ko-KR", {
+  return new Intl.DateTimeFormat("ko-KR", {
     timeZone: "Asia/Seoul",
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
-  });
-  return formatter.format(date);
+  }).format(date);
 }
 
 function getKSTTimeString(date = new Date()) {
-  const formatter = new Intl.DateTimeFormat("ko-KR", {
+  return new Intl.DateTimeFormat("ko-KR", {
     timeZone: "Asia/Seoul",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hour12: false
-  });
-  return formatter.format(date);
+  }).format(date);
 }
 
-// 실시간 KST 시계 구동
+// 실시간 시계
 function startKSTClock() {
   const clockEl = document.getElementById("kstClock");
   setInterval(() => {
-    const timeStr = getKSTTimeString();
     if (clockEl) {
-      clockEl.innerText = `${timeStr} KST`;
+      clockEl.innerText = `${getKSTTimeString()} KST`;
     }
   }, 1000);
 }
 
-// 모바일 백그라운드 복귀 & 자정 롤오버 감지기 (BFCache 대응)
+// BFCache 및 모바일 백그라운드 복귀 대응
 function setupMobileLifecycle() {
   state.lastDateStr = getKSTDateString();
 
   const handleResume = () => {
     const currentDateStr = getKSTDateString();
     if (currentDateStr !== state.lastDateStr) {
-      console.log(`[Lifecycle] 자정 롤오버 감지: ${state.lastDateStr} -> ${currentDateStr}. 전체 데이터 자동 갱신.`);
+      console.log(`[Lifecycle] 자정 롤오버 감지. 전체 데이터 갱신.`);
       state.lastDateStr = currentDateStr;
-      loadAllWidgets();
+      refreshAllData();
     } else {
-      console.log("[Lifecycle] 모바일 화면 복귀 감지. 실시간 교통/날씨 갱신.");
-      loadWeatherWidget();
-      loadTransitWidget();
+      console.log("[Lifecycle] 모바일 화면 복귀. 날씨/즐겨찾기 퀵 갱신.");
+      loadWeatherSummary();
+      loadFavoritesQuickView();
     }
   };
 
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-      handleResume();
-    }
+    if (document.visibilityState === "visible") handleResume();
   });
-
   window.addEventListener("pageshow", (e) => {
-    if (e.persisted) {
-      console.log("[Lifecycle] BFCache에서 복원됨.");
-      handleResume();
-    }
+    if (e.persisted) handleResume();
   });
-
   window.addEventListener("focus", handleResume);
 }
 
-// 앱 초기화
+// 초기화
 async function initApp() {
   startKSTClock();
   setupMobileLifecycle();
@@ -95,58 +93,31 @@ async function initApp() {
 
       document.getElementById("currentLocText").innerText = data.default_location.address;
       document.getElementById("headerSubtitle").innerText = `${data.kst_date_string} (${data.kst_day_name}) 즐거운 하루 시작!`;
-
-      // 주말이면 상단 배지 강조
-      if (data.is_weekend) {
-        document.getElementById("hospitalWeekendBadge").innerText = "🚨 주말 당번약국 & 소아과 집중 모드";
-      }
     }
   } catch (e) {
-    console.warn("Init API 에러, 기본 위치 사용:", e);
+    console.warn("Init API 에러, 기본 위치 유지:", e);
   }
 
-  // 6대 위젯 독립 비동기 로딩 (서로 지연을 주지 않음)
-  loadAllWidgets();
-  setupEventHandlers();
-  applyContextPriority();
+  setupGlobalEvents();
+  refreshAllData();
 }
 
-function loadAllWidgets() {
-  loadWeatherWidget();
-  loadTransitWidget();
-  loadHospitalWidget("ALL");
-  loadRestaurantWidget();
-  loadHealthAlertWidget();
-  loadCultureWidget();
+// 전체 데이터 비동기 갱신
+async function refreshAllData() {
+  await Promise.allSettled([
+    loadWeatherSummary(),
+    loadFavoritesQuickView(),
+    preloadCategoryData()
+  ]);
 }
 
-// 시간대/상황별 카드 순서 자동 재배치 (Context-Aware UX)
-function applyContextPriority() {
-  const hour = new Date().getHours();
-  const container = document.querySelector(".app-container");
-  const weatherCard = document.getElementById("cardWeather");
-  const transitCard = document.getElementById("cardTransit");
-  const hospitalCard = document.getElementById("cardHospital");
-  const restaurantCard = document.getElementById("cardRestaurant");
-  const cultureCard = document.getElementById("cardCulture");
-
-  // 평일 아침 06:30 ~ 09:30: 출근/등교 교통 루트를 최우선 노출
-  if (!state.isWeekend && hour >= 6 && hour < 10) {
-    container.insertBefore(transitCard, weatherCard);
-  }
-  // 주말: 나들이 & 병원/약국 카드를 상위로 이동
-  else if (state.isWeekend) {
-    container.insertBefore(hospitalCard, transitCard);
-    container.insertBefore(cultureCard, restaurantCard);
-  }
-}
-
-// 1. 날씨 & 옷차림 위젯 로드
-async function loadWeatherWidget() {
+// 1. 초기화면: 날씨 & 옷차림 요약 카드
+async function loadWeatherSummary() {
   try {
     const res = await fetch(`/api/weather?lat=${state.currentLat}&lon=${state.currentLon}`);
-    if (!res.ok) throw new Error("Weather error");
+    if (!res.ok) throw new Error("Weather API error");
     const data = await res.json();
+    state.cachedData.weather = data;
 
     document.getElementById("currentTemp").innerText = `${data.temp}℃`;
     document.getElementById("tempRange").innerText = `최저 ${data.temp_min}℃ / 최고 ${data.temp_max}℃ (체감 ${data.feels_like}℃)`;
@@ -168,183 +139,335 @@ async function loadWeatherWidget() {
 
     document.getElementById("outfitIcon").innerText = data.outfit_icon;
     document.getElementById("outfitText").innerText = data.outfit_recommendation;
-    document.getElementById("weatherUpdated").innerText = `${data.updated_at} 갱신`;
   } catch (e) {
     console.error("Weather load fail:", e);
-    document.getElementById("outfitText").innerText = "날씨 정보를 불러오는 중입니다.";
   }
 }
 
-// 2. 교통 루트 위젯 로드
-async function loadTransitWidget() {
-  const listEl = document.getElementById("transitList");
+// 2. 초기화면: 내가 등록한 즐겨찾기 퀵뷰 (교통 + 단골식당 통합 렌더링)
+async function loadFavoritesQuickView() {
+  const container = document.getElementById("favoritesQuickList");
   try {
-    const res = await fetch("/api/transit");
-    if (!res.ok) throw new Error("Transit error");
-    const items = await res.json();
+    const [transitRes, restRes] = await Promise.all([
+      fetch("/api/transit"),
+      fetch("/api/restaurant")
+    ]);
 
-    if (!items || items.length === 0) {
-      listEl.innerHTML = `<div style="text-align: center; color: #94a3b8; padding: 20px;">등록된 루트가 없습니다. [+ 루트 추가]를 눌러보세요.</div>`;
-      return;
+    const transitItems = transitRes.ok ? await transitRes.json() : [];
+    const restItems = restRes.ok ? await restRes.json() : [];
+
+    state.cachedData.transit = transitItems;
+    state.cachedData.restaurant = restItems;
+
+    // 카테고리 카드 미리보기 텍스트 업데이트
+    if (transitItems.length > 0) {
+      document.getElementById("catPreviewTransit").innerText = `${transitItems[0].route_no} 외 ${transitItems.length}개 노선 실시간 도착`;
+    }
+    if (restItems.length > 0) {
+      document.getElementById("catPreviewRestaurant").innerText = `단골 ${restItems.length}곳 등록 (주말 영업시간 확인)`;
     }
 
-    listEl.innerHTML = items.map(item => `
-      <div class="route-item">
-        <div class="route-left">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span class="route-badge-num" style="background: ${item.badge_color || '#3b82f6'};">
-              ${item.route_no}
-            </span>
-            <span style="font-size: 13px; font-weight: 700; color: #1e293b;">${item.title}</span>
+    let cardsHtml = "";
+
+    // 교통 즐겨찾기 미니 카드들
+    transitItems.forEach(item => {
+      cardsHtml += `
+        <div class="fav-card" onclick="openCategoryDetail('transit')">
+          <div>
+            <div class="fav-top">
+              <span class="fav-badge" style="background: ${item.badge_color || '#3b82f6'};">${item.route_no}</span>
+              <span style="font-size: 11px; color: #64748b; font-weight: 700;">${item.member_name}</span>
+            </div>
+            <div class="fav-title">${item.title}</div>
+            <div class="fav-sub">${item.station_name}</div>
           </div>
-          <div class="route-station">
-            📍 ${item.station_name} ➔ ${item.destination || '행선지'}
+          <div class="fav-highlight">⏱️ ${item.remain_time}</div>
+        </div>
+      `;
+    });
+
+    // 식당 즐겨찾기 미니 카드들
+    restItems.forEach(item => {
+      cardsHtml += `
+        <div class="fav-card" onclick="openCategoryDetail('restaurant')">
+          <div>
+            <div class="fav-top">
+              <span class="fav-badge" style="background: #f97316;">${item.category}</span>
+              <span style="font-size: 11px; color: #10b981; font-weight: 700;">영업중</span>
+            </div>
+            <div class="fav-title">${item.name}</div>
+            <div class="fav-sub">${item.closed_days}</div>
+          </div>
+          <div style="font-size: 12px; font-weight: 700; color: #d97706; margin-top: 6px;">
+            ⏰ ${item.business_hours}
           </div>
         </div>
-        <div class="route-right">
-          <div class="route-time">${item.remain_time}</div>
-          <div class="route-stops">${item.remain_stops} (${item.crowded_level || '여유'})</div>
-        </div>
-      </div>
-    `).join("");
-  } catch (e) {
-    listEl.innerHTML = `<div style="color: #ef4444; padding: 12px; font-size: 13px;">교통 도착정보 일시 조회 지연 중입니다.</div>`;
-  }
-}
+      `;
+    });
 
-// 3. 병원 & 당번약국 위젯 로드
-async function loadHospitalWidget(filterType = "ALL") {
-  const listEl = document.getElementById("hospitalList");
-  try {
-    const res = await fetch(`/api/hospital?lat=${state.currentLat}&lon=${state.currentLon}&filter_type=${filterType}`);
-    if (!res.ok) throw new Error("Hospital error");
-    const data = await res.json();
-    const items = data.items || [];
-
-    if (items.length === 0) {
-      listEl.innerHTML = `<div style="text-align: center; color: #94a3b8; padding: 20px;">해당 조건의 운영 중인 의료기관이 없습니다.</div>`;
-      return;
+    if (!cardsHtml) {
+      cardsHtml = `<div style="padding: 14px; font-size: 12px; color: #94a3b8;">등록된 즐겨찾기가 없습니다. 우측 상단 [+ 새 루트 등록]을 눌러보세요.</div>`;
     }
 
-    listEl.innerHTML = items.map(item => `
-      <div class="hospital-item">
-        <div>
-          <div class="hosp-name">
-            <span>${item.type === '약국' ? '💊' : '🏥'}</span>
-            <span>${item.name}</span>
-            <span style="font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">
-              ${item.badge || item.type}
-            </span>
-          </div>
-          <div class="hosp-hours">
-            ⏰ ${item.today_hours}
-          </div>
-          <div style="font-size: 11px; color: #64748b; margin-top: 2px;">
-            ${item.distance} | ${item.address}
-          </div>
-        </div>
-        <a href="tel:${item.phone}" class="hosp-call-btn" title="전화걸기">
-          📞
-        </a>
-      </div>
-    `).join("");
+    container.innerHTML = cardsHtml;
   } catch (e) {
-    listEl.innerHTML = `<div style="color: #ef4444; padding: 12px; font-size: 13px;">의료기관 조회 실패</div>`;
+    console.error("Favorites load fail:", e);
   }
 }
 
-// 4. 단골 식당 위젯 로드
-async function loadRestaurantWidget() {
-  const listEl = document.getElementById("restaurantList");
+// 카테고리 프리로드 (병원, 건강, 문화)
+async function preloadCategoryData() {
   try {
-    const res = await fetch("/api/restaurant");
-    if (!res.ok) throw new Error("Restaurant error");
-    const items = await res.json();
+    const [hospRes, healthRes, cultureRes] = await Promise.all([
+      fetch(`/api/hospital?lat=${state.currentLat}&lon=${state.currentLon}&filter_type=ALL`),
+      fetch(`/api/health?lat=${state.currentLat}&lon=${state.currentLon}`),
+      fetch(`/api/culture?lat=${state.currentLat}&lon=${state.currentLon}`)
+    ]);
 
-    if (!items || items.length === 0) {
-      listEl.innerHTML = `<div style="text-align: center; color: #94a3b8; padding: 20px;">등록된 단골 식당이 없습니다.</div>`;
-      return;
+    if (hospRes.ok) {
+      const hData = await hospRes.json();
+      state.cachedData.hospital = hData;
+      const count = (hData.items || []).length;
+      document.getElementById("catPreviewHospital").innerText = `지금 문 연 약국·소아과 ${count}곳 확인`;
     }
-
-    listEl.innerHTML = items.map(item => `
-      <div class="restaurant-card">
-        <div class="rest-title">
-          <span>🍴 ${item.name} <span style="font-size: 12px; color: #64748b; font-weight: normal;">(${item.category})</span></span>
-          <span style="font-size: 12px; color: #10b981;">${item.status_badge || '영업중'}</span>
-        </div>
-        <div style="font-size: 12px; color: #475569; margin-top: 4px;">
-          ⏰ <b>영업시간:</b> ${item.business_hours} (${item.closed_days})
-        </div>
-        ${item.family_note ? `<div class="rest-note">📝 <b>가족메모:</b> ${item.family_note}</div>` : ''}
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
-          <span style="font-size: 11px; color: #94a3b8;">${item.address}</span>
-          <a href="tel:${item.phone}" style="font-size: 12px; color: #0284c7; text-decoration: none; font-weight: 700;">전화문의 📞</a>
-        </div>
-      </div>
-    `).join("");
+    if (healthRes.ok) {
+      const hlData = await healthRes.json();
+      state.cachedData.health = hlData;
+      document.getElementById("catPreviewHealth").innerText = `꽃가루 및 감기 위험도 예보`;
+    }
+    if (cultureRes.ok) {
+      const cData = await cultureRes.json();
+      state.cachedData.culture = cData;
+      const fCount = (cData.festivals || []).length;
+      document.getElementById("catPreviewCulture").innerText = `이번 주말 행사 ${fCount}건 & 붐빔 신호등`;
+    }
   } catch (e) {
-    listEl.innerHTML = `<div style="color: #ef4444; padding: 12px;">식당 목록 로드 지연</div>`;
+    console.warn("Preload error:", e);
   }
 }
 
-// 5. 알레르기/질병 예보 위젯 로드
-async function loadHealthAlertWidget() {
-  const listEl = document.getElementById("healthAlertList");
-  try {
-    const res = await fetch(`/api/health?lat=${state.currentLat}&lon=${state.currentLon}`);
-    const data = await res.json();
-    const alerts = data.alerts || [];
+// =========================================================
+// 카테고리 상세 바텀 시트 열기 & 상세 렌더링
+// =========================================================
+async function openCategoryDetail(catKey) {
+  const backdrop = document.getElementById("sheetBackdrop");
+  const titleEl = document.getElementById("sheetTitle");
+  const contentEl = document.getElementById("sheetContent");
 
-    listEl.innerHTML = alerts.map(a => `
-      <div style="background: rgba(248, 250, 252, 0.85); border-radius: 12px; padding: 12px; margin-bottom: 8px; border-left: 4px solid ${a.color};">
+  backdrop.style.display = "flex";
+
+  if (catKey === "transit") {
+    titleEl.innerHTML = `<span>🚌</span> 실시간 교통 도착 정보`;
+    renderTransitDetail(contentEl);
+  } else if (catKey === "hospital") {
+    titleEl.innerHTML = `<span>🏥</span> 우리동네 병원 & 당번약국`;
+    renderHospitalDetail(contentEl, "ALL");
+  } else if (catKey === "restaurant") {
+    titleEl.innerHTML = `<span>🍽️</span> 우리 가족 단골 식당 & 외식`;
+    renderRestaurantDetail(contentEl);
+  } else if (catKey === "health") {
+    titleEl.innerHTML = `<span>🩺</span> 질병 & 꽃가루 알레르기 예보`;
+    renderHealthDetail(contentEl);
+  } else if (catKey === "culture") {
+    titleEl.innerHTML = `<span>🎪</span> 주말 나들이 & 축제 / 붐빔 신호등`;
+    renderCultureDetail(contentEl);
+  } else if (catKey === "manage") {
+    titleEl.innerHTML = `<span>⚙️</span> 나만의 즐겨찾기 간편 관리`;
+    renderManageDetail(contentEl);
+  }
+}
+
+function closeCategoryDetail() {
+  document.getElementById("sheetBackdrop").style.display = "none";
+}
+
+// 1) 교통 상세 렌더링
+function renderTransitDetail(container) {
+  const items = state.cachedData.transit || [];
+  let html = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <span style="font-size: 13px; font-weight: 700; color: #475569;">실시간 도착 카운트다운 (30초 자동갱신)</span>
+      <button onclick="document.getElementById('modalAddRoute').style.display='flex'" style="padding: 6px 12px; background: #0ea5e9; color: white; border: none; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer;">+ 루트 추가</button>
+    </div>
+  `;
+
+  if (items.length === 0) {
+    html += `<div style="text-align: center; color: #94a3b8; padding: 30px;">등록된 교통 루트가 없습니다.</div>`;
+  } else {
+    items.forEach(item => {
+      html += `
+        <div class="detail-item-card">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="background: ${item.badge_color || '#3b82f6'}; color: white; font-weight: 800; font-size: 13px; padding: 2px 8px; border-radius: 6px;">${item.route_no}</span>
+              <span style="font-weight: 800; color: #1e293b; font-size: 14px;">${item.title}</span>
+            </div>
+            <span style="font-size: 16px; font-weight: 800; color: #e11d48;">${item.remain_time}</span>
+          </div>
+          <div style="font-size: 12px; color: #64748b; margin-top: 6px;">
+            📍 <b>탑승 정류장:</b> ${item.station_name} ➔ ${item.destination || '행선지'}
+          </div>
+          <div style="font-size: 11px; color: #0284c7; margin-top: 2px; font-weight: 600;">
+            ${item.remain_stops} (${item.crowded_level || '여유'})
+          </div>
+        </div>
+      `;
+    });
+  }
+  container.innerHTML = html;
+}
+
+// 2) 병원 & 당번약국 상세 렌더링
+function renderHospitalDetail(container, filterType = "ALL") {
+  const data = state.cachedData.hospital || { items: [] };
+  let items = data.items || [];
+
+  if (filterType === "PHARMACY") items = items.filter(x => x.type === "약국");
+  else if (filterType === "CHILDREN") items = items.filter(x => x.type.includes("소아") || x.badge === "달빛어린이병원");
+  else if (filterType === "OPEN_NOW") items = items.filter(x => x.is_open_now);
+
+  let html = `
+    <div class="filter-chips">
+      <button class="chip ${filterType === 'ALL' ? 'active' : ''}" onclick="renderHospitalDetail(document.getElementById('sheetContent'), 'ALL')">전체</button>
+      <button class="chip ${filterType === 'PHARMACY' ? 'active' : ''}" onclick="renderHospitalDetail(document.getElementById('sheetContent'), 'PHARMACY')">💊 당번약국</button>
+      <button class="chip ${filterType === 'CHILDREN' ? 'active' : ''}" onclick="renderHospitalDetail(document.getElementById('sheetContent'), 'CHILDREN')">👶 소아과/달빛병원</button>
+      <button class="chip ${filterType === 'OPEN_NOW' ? 'active' : ''}" onclick="renderHospitalDetail(document.getElementById('sheetContent'), 'OPEN_NOW')">🟢 지금 문 연 곳</button>
+    </div>
+  `;
+
+  if (items.length === 0) {
+    html += `<div style="text-align: center; color: #94a3b8; padding: 30px;">조건에 맞는 의료기관이 없습니다.</div>`;
+  } else {
+    items.forEach(item => {
+      html += `
+        <div class="detail-item-card" style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <div style="font-weight: 800; font-size: 14px; color: #1e293b; display: flex; align-items: center; gap: 6px;">
+              <span>${item.type === '약국' ? '💊' : '🏥'}</span>
+              <span>${item.name}</span>
+              <span style="font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px;">${item.badge || item.type}</span>
+            </div>
+            <div style="font-size: 12px; color: #059669; font-weight: 700; margin-top: 4px;">
+              ⏰ ${item.today_hours}
+            </div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 2px;">
+              ${item.distance} | ${item.address}
+            </div>
+          </div>
+          <a href="tel:${item.phone}" style="background: #e0f2fe; color: #0284c7; width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; text-decoration: none;">
+            📞
+          </a>
+        </div>
+      `;
+    });
+  }
+  container.innerHTML = html;
+}
+
+// 3) 단골 식당 상세 렌더링
+function renderRestaurantDetail(container) {
+  const items = state.cachedData.restaurant || [];
+  let html = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <span style="font-size: 13px; font-weight: 700; color: #475569;">우리 가족이 자주 가는 단골 식당</span>
+      <button onclick="document.getElementById('modalAddRestaurant').style.display='flex'" style="padding: 6px 12px; background: #10b981; color: white; border: none; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer;">+ 단골 등록</button>
+    </div>
+  `;
+
+  if (items.length === 0) {
+    html += `<div style="text-align: center; color: #94a3b8; padding: 30px;">등록된 단골 식당이 없습니다.</div>`;
+  } else {
+    items.forEach(item => {
+      html += `
+        <div class="detail-item-card">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-weight: 800; font-size: 15px; color: #1e293b;">🍴 ${item.name} <span style="font-size: 12px; color: #64748b; font-weight: normal;">(${item.category})</span></span>
+            <span style="font-size: 12px; font-weight: 700; color: #10b981;">${item.status_badge || '영업중'}</span>
+          </div>
+          <div style="font-size: 12px; color: #334155; margin-top: 5px;">
+            ⏰ <b>영업시간:</b> ${item.business_hours}
+          </div>
+          <div style="font-size: 12px; color: #dc2626; margin-top: 2px;">
+            🛑 <b>휴무일:</b> ${item.closed_days}
+          </div>
+          ${item.family_note ? `<div style="font-size: 12px; color: #d97706; background: #fffbeb; padding: 6px 10px; border-radius: 8px; margin-top: 6px; font-weight: 600;">📝 <b>가족메모:</b> ${item.family_note}</div>` : ''}
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; border-top: 1px solid #f1f5f9; padding-top: 6px;">
+            <span style="font-size: 11px; color: #94a3b8;">${item.address}</span>
+            <a href="tel:${item.phone}" style="font-size: 12px; color: #0ea5e9; text-decoration: none; font-weight: 700;">전화문의 📞</a>
+          </div>
+        </div>
+      `;
+    });
+  }
+  container.innerHTML = html;
+}
+
+// 4) 질병/알레르기 상세 렌더링
+function renderHealthDetail(container) {
+  const data = state.cachedData.health || { alerts: [] };
+  let html = `<div style="font-size: 13px; font-weight: 700; color: #475569; margin-bottom: 10px;">기상청 및 국민건강보험공단 질병 위험 지수</div>`;
+
+  (data.alerts || []).forEach(a => {
+    html += `
+      <div class="detail-item-card" style="border-left: 4px solid ${a.color};">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-size: 13px; font-weight: 800; color: #1e293b;">${a.disease}</span>
-          <span style="font-size: 11px; font-weight: 700; color: white; background: ${a.color}; padding: 2px 8px; border-radius: 999px;">
-            ${a.level}
-          </span>
+          <span style="font-weight: 800; font-size: 14px; color: #1e293b;">${a.disease}</span>
+          <span style="background: ${a.color}; color: white; font-weight: 800; font-size: 11px; padding: 2px 8px; border-radius: 999px;">${a.level}</span>
         </div>
-        <div style="font-size: 12px; color: #475569; margin-top: 4px;">
-          💡 ${a.tip}
+        <div style="font-size: 12px; color: #475569; margin-top: 6px; line-height: 1.4;">
+          💡 <b>예방 수칙:</b> ${a.tip}
         </div>
       </div>
-    `).join("");
-  } catch (e) {
-    listEl.innerHTML = `<div style="color: #94a3b8; font-size: 12px;">질병 예보 조회 중...</div>`;
-  }
+    `;
+  });
+  container.innerHTML = html;
 }
 
-// 6. 주말 나들이 & 축제/혼잡도 위젯 로드
-async function loadCultureWidget() {
-  const listEl = document.getElementById("cultureList");
-  try {
-    const res = await fetch(`/api/culture?lat=${state.currentLat}&lon=${state.currentLon}`);
-    const data = await res.json();
-    const items = data.festivals || [];
+// 5) 축제/나들이 상세 렌더링
+function renderCultureDetail(container) {
+  const data = state.cachedData.culture || { festivals: [] };
+  let html = `<div style="font-size: 13px; font-weight: 700; color: #475569; margin-bottom: 10px;">남양주 및 인근 주말 행사 & 실시간 혼잡도 신호등</div>`;
 
-    listEl.innerHTML = items.map(f => `
-      <div class="culture-item">
+  (data.festivals || []).forEach(f => {
+    html += `
+      <div class="detail-item-card">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-size: 14px; font-weight: 800; color: #1e293b;">🎪 ${f.title}</span>
-          <span class="crowd-indicator" style="background: #fef3c7; color: #b45309;">
+          <span style="font-weight: 800; font-size: 14px; color: #1e293b;">🎪 ${f.title}</span>
+          <span style="background: #fef3c7; color: #b45309; font-weight: 700; font-size: 11px; padding: 2px 8px; border-radius: 6px;">
             혼잡도: ${f.crowd_status}
           </span>
         </div>
         <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
           📍 ${f.location} (${f.distance}) | 📅 ${f.period}
         </div>
-        <div style="font-size: 12px; font-weight: 600; color: #059669; margin-top: 6px;">
+        <div style="font-size: 12px; color: #059669; font-weight: 600; margin-top: 6px;">
           👉 ${f.recommendation}
         </div>
       </div>
-    `).join("");
-  } catch (e) {
-    listEl.innerHTML = `<div style="color: #94a3b8; font-size: 12px;">행사 정보 조회 중...</div>`;
-  }
+    `;
+  });
+  container.innerHTML = html;
 }
 
-// 이벤트 핸들러 바인딩
-function setupEventHandlers() {
-  // GPS 위치 새로고침 버튼
+// 6) 관리 메뉴
+function renderManageDetail(container) {
+  container.innerHTML = `
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <div class="detail-item-card" onclick="document.getElementById('modalAddRoute').style.display='flex'" style="cursor: pointer;">
+        <div style="font-weight: 800; font-size: 15px; color: #0ea5e9;">🚌 새 출퇴근/등교 교통 루트 추가</div>
+        <div style="font-size: 12px; color: #64748b; margin-top: 4px;">집 앞 버스 정류장과 자주 타는 노선을 등록하여 초기화면에서 바로 확인하세요.</div>
+      </div>
+      <div class="detail-item-card" onclick="document.getElementById('modalAddRestaurant').style.display='flex'" style="cursor: pointer;">
+        <div style="font-weight: 800; font-size: 15px; color: #10b981;">🍽️ 우리 가족 단골 식당 등록</div>
+        <div style="font-size: 12px; color: #64748b; margin-top: 4px;">주말 영업시간과 마감시간, 가족 메모를 기록해두고 외식 전에 바로 확인하세요.</div>
+      </div>
+    </div>
+  `;
+}
+
+// 이벤트 리스너 바인딩
+function setupGlobalEvents() {
+  // GPS 새로고침
   document.getElementById("btnRefreshLoc").addEventListener("click", () => {
     if ("geolocation" in navigator) {
       document.getElementById("currentLocText").innerText = "현재 GPS 위치 확인 중...";
@@ -353,7 +476,7 @@ function setupEventHandlers() {
           state.currentLat = pos.coords.latitude;
           state.currentLon = pos.coords.longitude;
           document.getElementById("currentLocText").innerText = `내 위치 (${state.currentLat.toFixed(3)}, ${state.currentLon.toFixed(3)})`;
-          loadAllWidgets();
+          refreshAllData();
         },
         (err) => {
           alert("GPS 위치 확인 권한이 없거나 꺼져 있어 기본 위치(남양주시 평내유진마젤란)를 유지합니다.");
@@ -361,8 +484,6 @@ function setupEventHandlers() {
         },
         { timeout: 5000 }
       );
-    } else {
-      alert("이 브라우저는 위치 정보를 지원하지 않습니다.");
     }
   });
 
@@ -373,26 +494,18 @@ function setupEventHandlers() {
       tabs.forEach(t => t.classList.remove("active"));
       tab.classList.add("active");
       state.activeMember = parseInt(tab.dataset.member);
-      console.log(`가족 멤버 전환: ${state.activeMember}`);
-      loadTransitWidget();
+      loadFavoritesQuickView();
     });
   });
 
-  // 병원 필터 칩
-  const chips = document.querySelectorAll(".chip");
-  chips.forEach(chip => {
-    chip.addEventListener("click", () => {
-      chips.forEach(c => c.classList.remove("active"));
-      chip.classList.add("active");
-      loadHospitalWidget(chip.dataset.filter);
-    });
+  // 퀵 루트 등록 버튼
+  document.getElementById("btnQuickAddRoute").addEventListener("click", () => {
+    document.getElementById("modalAddRoute").style.display = "flex";
   });
 
   // 모달 제어 (루트 추가)
   const modalRoute = document.getElementById("modalAddRoute");
-  document.getElementById("btnOpenAddRoute").addEventListener("click", () => modalRoute.style.display = "flex");
   document.getElementById("btnCloseRouteModal").addEventListener("click", () => modalRoute.style.display = "none");
-
   document.getElementById("btnSaveRoute").addEventListener("click", async () => {
     const title = document.getElementById("inputRouteTitle").value.trim();
     const station = document.getElementById("inputStationName").value.trim();
@@ -418,14 +531,12 @@ function setupEventHandlers() {
     });
 
     modalRoute.style.display = "none";
-    loadTransitWidget();
+    loadFavoritesQuickView();
   });
 
   // 모달 제어 (단골 식당 등록)
   const modalRest = document.getElementById("modalAddRestaurant");
-  document.getElementById("btnOpenAddRestaurant").addEventListener("click", () => modalRest.style.display = "flex");
   document.getElementById("btnCloseRestModal").addEventListener("click", () => modalRest.style.display = "none");
-
   document.getElementById("btnSaveRest").addEventListener("click", async () => {
     const name = document.getElementById("inputRestName").value.trim();
     const category = document.getElementById("inputRestCategory").value.trim() || "식당";
@@ -451,17 +562,9 @@ function setupEventHandlers() {
     });
 
     modalRest.style.display = "none";
-    loadRestaurantWidget();
+    loadFavoritesQuickView();
   });
 }
 
-// 부드러운 스크롤 이동
-function scrollToCard(id) {
-  const el = document.getElementById(id);
-  if (el) {
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-}
-
-// 돔 로드 완료 시 구동
+// 돔 로드 완료 시 앱 구동
 document.addEventListener("DOMContentLoaded", initApp);

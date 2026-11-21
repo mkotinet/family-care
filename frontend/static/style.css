@@ -1,5 +1,6 @@
 /* =========================================================
    우리가족챙기기 (Family Care) - Fresh Pastel Neo-Glassmorphism
+   고도화: 카테고리 허브 & 즐겨찾기 퀵뷰 & 바텀 시트 상세 뷰어
    ========================================================= */
 
 :root {
@@ -7,14 +8,16 @@
   --primary-mint: #10b981;
   --primary-sky: #0ea5e9;
   --primary-orange: #f97316;
+  --primary-purple: #8b5cf6;
   --primary-yellow: #f59e0b;
   --text-dark: #0f172a;
   --text-muted: #64748b;
   --bg-glass: rgba(255, 255, 255, 0.88);
   --bg-glass-card: rgba(255, 255, 255, 0.92);
-  --border-glass: rgba(255, 255, 255, 0.65);
-  --shadow-soft: 0 10px 30px -5px rgba(0, 0, 0, 0.05), 0 4px 12px -2px rgba(0, 0, 0, 0.03);
-  --shadow-hover: 0 20px 35px -5px rgba(0, 0, 0, 0.08), 0 8px 16px -2px rgba(0, 0, 0, 0.04);
+  --border-glass: rgba(255, 255, 255, 0.7);
+  --shadow-soft: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 4px 10px -2px rgba(0, 0, 0, 0.02);
+  --shadow-card: 0 8px 20px -3px rgba(0, 0, 0, 0.06);
+  --shadow-hover: 0 16px 30px -4px rgba(0, 0, 0, 0.09);
 }
 
 * {
@@ -31,20 +34,20 @@ body {
   background-image: 
     radial-gradient(at 0% 0%, rgba(254, 240, 138, 0.45) 0px, transparent 50%),
     radial-gradient(at 100% 0%, rgba(253, 186, 116, 0.4) 0px, transparent 50%),
-    radial-gradient(at 50% 40%, rgba(186, 230, 253, 0.45) 0px, transparent 50%),
+    radial-gradient(at 50% 35%, rgba(186, 230, 253, 0.45) 0px, transparent 50%),
     radial-gradient(at 100% 100%, rgba(167, 243, 208, 0.45) 0px, transparent 50%),
     radial-gradient(at 0% 100%, rgba(244, 208, 250, 0.35) 0px, transparent 50%);
   background-attachment: fixed;
   min-height: 100vh;
   line-height: 1.5;
-  padding-bottom: 90px;
+  padding-bottom: 40px;
 }
 
-/* 컨테이너 */
+/* 앱 메인 컨테이너 */
 .app-container {
-  max-width: 540px;
+  max-width: 520px;
   margin: 0 auto;
-  padding: 16px 16px 24px;
+  padding: 16px 16px 32px;
 }
 
 /* 상단 헤더 */
@@ -52,29 +55,39 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
-  padding: 8px 4px;
+  margin-bottom: 12px;
+  padding: 4px 2px;
 }
 
 .brand-title {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 800;
   background: linear-gradient(135deg, #0ea5e9, #10b981, #f59e0b);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .brand-subtitle {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-muted);
-  font-weight: 500;
-  margin-top: 2px;
+  font-weight: 600;
+  margin-top: 1px;
 }
 
-/* 위치 & KST 시간 바 */
+.kst-pill {
+  font-size: 12px;
+  font-weight: 800;
+  color: #0284c7;
+  background: #e0f2fe;
+  padding: 5px 12px;
+  border-radius: 999px;
+  box-shadow: 0 2px 6px rgba(14, 165, 233, 0.15);
+}
+
+/* 위치 바 */
 .location-bar {
   background: var(--bg-glass);
   backdrop-filter: blur(16px);
@@ -85,7 +98,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   box-shadow: var(--shadow-soft);
 }
 
@@ -102,9 +115,9 @@ body {
   background: #f1f5f9;
   border: none;
   border-radius: 8px;
-  padding: 4px 8px;
+  padding: 4px 10px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   color: #475569;
   cursor: pointer;
   transition: all 0.2s;
@@ -120,7 +133,7 @@ body {
   gap: 8px;
   margin-bottom: 16px;
   overflow-x: auto;
-  padding-bottom: 4px;
+  padding-bottom: 2px;
   scrollbar-width: none;
 }
 
@@ -154,80 +167,50 @@ body {
   transform: translateY(-1px);
 }
 
-/* 공통 글래스 카드 */
-.glass-card {
+/* 1. 상단 기본 날씨 요약 카드 */
+.weather-summary-card {
   background: var(--bg-glass-card);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-glass);
-  border-radius: 22px;
-  padding: 20px;
-  margin-bottom: 18px;
+  border-radius: 20px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
   box-shadow: var(--shadow-soft);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
   position: relative;
   overflow: hidden;
 }
 
-.glass-card:hover {
-  box-shadow: var(--shadow-hover);
-}
-
-.card-header {
+.weather-header-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 14px;
 }
 
-.card-title {
-  font-size: 16px;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #1e293b;
-}
-
-.card-action-btn {
-  background: transparent;
-  border: none;
-  color: var(--primary-sky);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* 1. 날씨 & 옷차림 카드 */
-.weather-hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 14px;
-}
-
-.temp-large {
-  font-size: 42px;
+.weather-temp-main {
+  font-size: 38px;
   font-weight: 800;
   letter-spacing: -1px;
   color: #0f172a;
-  line-height: 1;
+  line-height: 1.1;
 }
 
-.temp-sub {
-  font-size: 13px;
+.weather-temp-sub {
+  font-size: 12px;
   color: #64748b;
   margin-top: 4px;
+  font-weight: 600;
+}
+
+.weather-icon-large {
+  font-size: 44px;
 }
 
 .weather-badge-group {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  margin-bottom: 14px;
+  margin: 12px 0 10px;
 }
 
 .badge {
@@ -240,114 +223,317 @@ body {
   gap: 4px;
 }
 
-.badge-rain {
-  background: #e0f2fe;
-  color: #0369a1;
-}
+.badge-rain { background: #e0f2fe; color: #0369a1; }
+.badge-air { background: #d1fae5; color: #065f46; }
+.badge-umbrella-yes { background: #fee2e2; color: #b91c1c; animation: pulse 2s infinite; }
+.badge-umbrella-no { background: #f1f5f9; color: #475569; }
 
-.badge-air {
-  background: #d1fae5;
-  color: #065f46;
-}
-
-.badge-umbrella-yes {
-  background: #fee2e2;
-  color: #b91c1c;
-  animation: pulse 2s infinite;
-}
-
-.badge-umbrella-no {
-  background: #f1f5f9;
-  color: #475569;
-}
-
-/* 옷차림 추천 배너 */
-.outfit-box {
-  background: linear-gradient(135deg, rgba(254, 243, 199, 0.7), rgba(253, 230, 138, 0.4));
-  border: 1px solid rgba(245, 158, 11, 0.2);
-  border-radius: 14px;
-  padding: 12px 14px;
+.outfit-banner {
+  background: linear-gradient(135deg, rgba(254, 243, 199, 0.75), rgba(253, 230, 138, 0.45));
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 12px;
+  padding: 10px 12px;
   display: flex;
   align-items: center;
+  gap: 10px;
+}
+
+.outfit-banner .icon { font-size: 24px; }
+.outfit-banner .text { font-size: 12px; font-weight: 700; color: #78350f; line-height: 1.4; }
+
+/* 2. 초기화면: 내가 등록한 즐겨찾기 퀵뷰 섹션 */
+.favorites-section {
+  margin-bottom: 20px;
+}
+
+.section-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 0 4px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.section-sub-action {
+  font-size: 12px;
+  color: #0ea5e9;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.favorites-scroll-container {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: none;
+}
+
+.favorites-scroll-container::-webkit-scrollbar {
+  display: none;
+}
+
+.fav-card {
+  min-width: 170px;
+  max-width: 200px;
+  background: var(--bg-glass-card);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--border-glass);
+  border-radius: 16px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow-card);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 0.2s;
+  cursor: pointer;
+}
+
+.fav-card:hover {
+  transform: translateY(-2px);
+}
+
+.fav-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.fav-badge {
+  font-size: 11px;
+  font-weight: 800;
+  color: white;
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.fav-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fav-sub {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fav-highlight {
+  font-size: 14px;
+  font-weight: 800;
+  color: #e11d48;
+  margin-top: 6px;
+}
+
+/* 3. 핵심 카테고리 카드 그리드 (2열 레이아웃) */
+.category-section {
+  margin-bottom: 24px;
+}
+
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 12px;
 }
 
-.outfit-icon {
+.cat-card {
+  background: var(--bg-glass-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-glass);
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 125px;
+}
+
+.cat-card:active {
+  transform: scale(0.97);
+}
+
+.cat-card:hover {
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-2px);
+}
+
+/* 카테고리별 악센트 그라디언트 테두리/배경 */
+.cat-transit { border-top: 4px solid var(--primary-sky); }
+.cat-hospital { border-top: 4px solid var(--primary-mint); }
+.cat-restaurant { border-top: 4px solid var(--primary-orange); }
+.cat-health { border-top: 4px solid var(--primary-purple); }
+.cat-culture { border-top: 4px solid var(--primary-yellow); }
+.cat-manage { border-top: 4px solid #64748b; }
+
+.cat-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.cat-icon {
   font-size: 28px;
 }
 
-.outfit-text {
-  font-size: 13px;
-  font-weight: 700;
-  color: #78350f;
-  line-height: 1.4;
+.cat-arrow {
+  font-size: 14px;
+  color: #94a3b8;
+  font-weight: bold;
 }
 
-/* 2. 교통 루트 카드 */
-.route-item {
-  background: rgba(248, 250, 252, 0.85);
+.cat-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.cat-preview {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.cat-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 6px;
+  margin-top: 6px;
+  width: fit-content;
+}
+
+/* 4. 카테고리 상세 모달 / 바텀 시트 (Bottom Sheet) */
+.detail-sheet-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: none;
+  justify-content: center;
+  align-items: flex-end;
+  z-index: 500;
+  transition: opacity 0.3s ease;
+}
+
+.detail-sheet {
+  background: #ffffff;
+  width: 100%;
+  max-width: 520px;
+  max-height: 85vh;
+  border-radius: 28px 28px 0 0;
+  padding: 24px 20px 36px;
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow-y: auto;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.sheet-handle-bar {
+  width: 44px;
+  height: 5px;
+  background: #cbd5e1;
+  border-radius: 999px;
+  margin: 0 auto 16px;
+}
+
+.sheet-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.sheet-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sheet-close-btn {
+  background: #f1f5f9;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 16px;
+  color: #64748b;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+}
+
+.sheet-content {
+  overflow-y: auto;
+  padding-bottom: 20px;
+}
+
+/* 상세 뷰 내부 리스트 아이템 스타일 */
+.detail-item-card {
+  background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
   padding: 14px;
   margin-bottom: 10px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 
-.route-left {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.route-badge-num {
-  font-size: 14px;
-  font-weight: 800;
-  color: white;
-  padding: 3px 8px;
-  border-radius: 6px;
-  display: inline-block;
-  width: fit-content;
-}
-
-.route-station {
-  font-size: 12px;
-  color: #64748b;
-  font-weight: 600;
-}
-
-.route-right {
-  text-align: right;
-}
-
-.route-time {
-  font-size: 16px;
-  font-weight: 800;
-  color: #e11d48;
-}
-
-.route-stops {
-  font-size: 11px;
-  color: #64748b;
-  margin-top: 2px;
-}
-
-/* 3. 의료 & 약국 카드 */
+/* 필터 칩 */
 .filter-chips {
   display: flex;
   gap: 6px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
   overflow-x: auto;
   scrollbar-width: none;
 }
-
-.filter-chips::-webkit-scrollbar {
-  display: none;
-}
+.filter-chips::-webkit-scrollbar { display: none; }
 
 .chip {
-  padding: 5px 12px;
+  padding: 6px 12px;
   border-radius: 10px;
   font-size: 12px;
   font-weight: 700;
@@ -356,166 +542,14 @@ body {
   border: none;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.2s;
 }
-
-.chip.active {
-  background: #10b981;
-  color: white;
-}
-
-.hospital-item {
-  background: rgba(248, 250, 252, 0.85);
-  border-radius: 14px;
-  border: 1px solid #e2e8f0;
-  padding: 14px;
-  margin-bottom: 10px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.hosp-name {
-  font-size: 14px;
-  font-weight: 800;
-  color: #1e293b;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.hosp-hours {
-  font-size: 12px;
-  color: #059669;
-  font-weight: 600;
-  margin-top: 4px;
-}
-
-.hosp-call-btn {
-  background: #e0f2fe;
-  color: #0284c7;
-  border: none;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  cursor: pointer;
-  text-decoration: none;
-}
-
-/* 4. 단골 식당 */
-.restaurant-card {
-  background: rgba(248, 250, 252, 0.85);
-  border-radius: 14px;
-  border: 1px solid #e2e8f0;
-  padding: 14px;
-  margin-bottom: 10px;
-}
-
-.rest-title {
-  font-size: 14px;
-  font-weight: 800;
-  color: #1e293b;
-  display: flex;
-  justify-content: space-between;
-}
-
-.rest-note {
-  font-size: 12px;
-  color: #f59e0b;
-  background: #fffbeb;
-  padding: 4px 8px;
-  border-radius: 6px;
-  margin-top: 6px;
-  font-weight: 600;
-}
-
-/* 5. 축제 & 혼잡도 */
-.culture-item {
-  background: rgba(248, 250, 252, 0.85);
-  border-radius: 14px;
-  border: 1px solid #e2e8f0;
-  padding: 14px;
-  margin-bottom: 10px;
-}
-
-.crowd-indicator {
-  display: inline-block;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 6px;
-}
-
-/* 스켈레톤 로딩 */
-.skeleton {
-  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: 8px;
-}
-
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-/* 모바일 하단 내비게이션 바 */
-.bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  max-width: 540px;
-  margin: 0 auto;
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-top: 1px solid rgba(226, 232, 240, 0.8);
-  display: flex;
-  justify-content: space-around;
-  padding: 10px 0 16px;
-  z-index: 100;
-}
-
-.nav-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #64748b;
-  text-decoration: none;
-  cursor: pointer;
-  border: none;
-  background: none;
-}
-
-.nav-item.active {
-  color: #0ea5e9;
-}
-
-.nav-item span {
-  font-size: 18px;
-}
+.chip.active { background: #10b981; color: white; }
 
 /* 모달 */
 .modal-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.45);
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(6px);
   display: none;
   align-items: center;
@@ -528,7 +562,12 @@ body {
   background: white;
   width: 100%;
   max-width: 440px;
-  border-radius: 20px;
+  border-radius: 22px;
   padding: 24px;
   box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
 }

@@ -35,9 +35,9 @@ const AppState = {
   kakao_js_key: "",
   mapEngine: "leaflet",    // 'kakao' or 'leaflet'
   location: {
-    lat: 37.6434558,
-    lon: 127.2311716,
-    address: "남양주시 평내동 평내유진마젤란"
+    lat: 37.643421,
+    lon: 127.236018,
+    address: "남양주시 평내동 평내마젤란21아파트"
   },
   weatherData: null,
   weatherTab: "hourly",
@@ -1004,7 +1004,7 @@ function switchDetailView(mode, forceReset = false) {
         AppState.kakaoCategoryMap.relayout();
         if (AppState.currentCategory === "transit" && !AppState.isSingleFocusMode) {
           AppState.kakaoCategoryMap.setLevel(3);
-          AppState.kakaoCategoryMap.setCenter(new kakao.maps.LatLng(37.643720, 127.231200));
+          AppState.kakaoCategoryMap.setCenter(new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon));
         }
         if (forceReset) {
           renderKakaoCategoryMarkers();
@@ -1013,7 +1013,7 @@ function switchDetailView(mode, forceReset = false) {
       } else if (AppState.leafletCategoryMap) {
         AppState.leafletCategoryMap.invalidateSize();
         if (AppState.currentCategory === "transit" && !AppState.isSingleFocusMode) {
-          AppState.leafletCategoryMap.setView([37.643720, 127.231200], 17);
+          AppState.leafletCategoryMap.setView([AppState.location.lat, AppState.location.lon], 17);
         }
         if (forceReset) {
           renderLeafletCategoryMarkers(AppState.leafletCategoryMap);
@@ -1204,8 +1204,8 @@ function renderLeafletCategoryMarkers(map) {
 // 카카오 카테고리 지도
 function initKakaoCategoryMap(container) {
   const isTransit = AppState.currentCategory === "transit";
-  const centerLat = isTransit ? 37.643720 : AppState.location.lat;
-  const centerLon = isTransit ? 127.231200 : AppState.location.lon;
+  const centerLat = AppState.location.lat;
+  const centerLon = AppState.location.lon;
   // 쾌적한 도보/단지 상세 스케일 (너무 축소되어 촘촘해지지 않도록 기본 레벨 3 보장)
   const zoomLevel = 3;
 
@@ -1606,30 +1606,32 @@ function formatFriendlyPlaceName(lat, lon, rawAddress = "", buildingName = "") {
   // 1. 역지오코딩 빌딩명/단지명이 제공된 경우 최우선 정제
   if (bStr) {
     if ((bStr.includes("화성") && bStr.includes("유진")) || bStr.includes("몬테소리")) return "평내화성.유진아파트";
-    if (bStr.includes("유진") || bStr.includes("마젤란")) return "평내화성.유진아파트";
-    if (bStr.includes("화성")) return "평내화성파크힐즈";
-    if (bStr.includes("대주") && bStr.includes("신명")) return "평내신명.대주.금호아파트";
-    if (bStr.includes("대주")) return "평내대주파크빌";
-    if (bStr.includes("신명")) return "평내신명아파트";
-    if (bStr.includes("중흥")) return "평내중흥.유라.삼창아파트";
+    if (bStr.includes("유진") || bStr.includes("마젤란") || bStr.includes("화성")) return "평내화성.유진아파트";
+    if (bStr.includes("대주") || bStr.includes("신명")) return "평내신명.대주.금호아파트";
+    if (bStr.includes("중흥") || bStr.includes("유라") || bStr.includes("삼창")) return "평내중흥.유라.삼창아파트";
     if (bStr.includes("금강")) return "호평마을금강아파트";
     if (bStr.includes("이마트")) return "이마트 남양주점";
     return bStr.endsWith("아파트") ? bStr : `${bStr}아파트`;
   }
 
-  // 2. 평내화성.유진아파트 (유진몬테소리어린이집 & 화성파크힐즈 사이 평내로 정류소 지오펜스 160m)
-  const yujinBusDist = calcDistanceKm(lat, lon, 37.643720, 127.231200) * 1000;
-  if (yujinBusDist <= 160 || addrStr.includes("624") || addrStr.includes("평내로 145") || addrStr.includes("유진") || addrStr.includes("화성")) {
+  // 2. 평내화성.유진아파트 (유진몬테소리어린이집 앞 23453 & 화성파크힐즈 앞 23454 실측 지오펜스)
+  const yujinDist1 = calcDistanceKm(lat, lon, 37.642380, 127.235250) * 1000;
+  const yujinDist2 = calcDistanceKm(lat, lon, 37.642150, 127.235650) * 1000;
+  if (yujinDist1 <= 150 || yujinDist2 <= 150 || addrStr.includes("유진") || addrStr.includes("화성") || addrStr.includes("몬테소리") || addrStr.includes("마젤란") || addrStr.includes("평내로 89") || addrStr.includes("평내로 72")) {
     return "평내화성.유진아파트";
   }
 
-  const shinmyeongDist = calcDistanceKm(lat, lon, 37.644500, 127.233500) * 1000;
-  if (shinmyeongDist <= 150 || addrStr.includes("617") || addrStr.includes("신명")) {
+  // 3. 평내신명.대주.금호아파트 (실측 지오펜스)
+  const shinmyeongDist1 = calcDistanceKm(lat, lon, 37.643800, 127.238500) * 1000;
+  const shinmyeongDist2 = calcDistanceKm(lat, lon, 37.643650, 127.238700) * 1000;
+  if (shinmyeongDist1 <= 150 || shinmyeongDist2 <= 150 || addrStr.includes("신명") || addrStr.includes("대주") || addrStr.includes("평내로 115")) {
     return "평내신명.대주.금호아파트";
   }
 
-  const jungheungDist = calcDistanceKm(lat, lon, 37.642500, 127.235500) * 1000;
-  if (jungheungDist <= 180 || addrStr.includes("603") || addrStr.includes("중흥")) {
+  // 4. 평내중흥.유라.삼창아파트 (실측 지오펜스)
+  const jungheungDist1 = calcDistanceKm(lat, lon, 37.646500, 127.241600) * 1000;
+  const jungheungDist2 = calcDistanceKm(lat, lon, 37.646300, 127.241800) * 1000;
+  if (jungheungDist1 <= 180 || jungheungDist2 <= 180 || addrStr.includes("중흥") || addrStr.includes("유라") || addrStr.includes("평내로 150")) {
     return "평내중흥.유라.삼창아파트";
   }
 
@@ -2674,8 +2676,8 @@ async function executeRestSearch() {
   }
 
   try {
-    const lat = (AppState.location && AppState.location.lat) ? AppState.location.lat : 37.6434558;
-    const lon = (AppState.location && AppState.location.lon) ? AppState.location.lon : 127.2311716;
+    const lat = (AppState.location && AppState.location.lat) ? AppState.location.lat : 37.643421;
+    const lon = (AppState.location && AppState.location.lon) ? AppState.location.lon : 127.236018;
     const res = await fetch(`/api/restaurant/search?query=${encodeURIComponent(q)}&lat=${lat}&lon=${lon}`);
     if (!res.ok) throw new Error("API 응답 실패: " + res.status);
     const places = await res.json();

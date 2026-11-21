@@ -11,7 +11,7 @@ KST = zoneinfo.ZoneInfo(TIMEZONE)
 
 # 가족 주요 안심 거점 (지오펜스)
 SAFE_ZONES = [
-    {"name": "집 (평내유진마젤란)", "lat": 37.6434558, "lon": 127.2311716, "radius": 250},
+    {"name": "집 (평내마젤란21)", "lat": DEFAULT_LOCATION["lat"], "lon": DEFAULT_LOCATION["lon"], "radius": 250},
     {"name": "평내초등학교 & 병설유치원", "lat": 37.646123, "lon": 127.234512, "radius": 250},
     {"name": "평내호평역 & 학원가", "lat": 37.653412, "lon": 127.244123, "radius": 350},
     {"name": "평내도서관 & 주민센터", "lat": 37.641203, "lon": 127.228945, "radius": 200}

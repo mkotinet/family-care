@@ -212,8 +212,15 @@ def init_db():
         if not cursor.fetchone():
             cursor.execute("""
             INSERT INTO user_locations (username, latitude, longitude, accuracy, address, landmark, battery_level, is_moving, updated_at)
-            VALUES (?, 37.6434558, 127.2311716, 10.0, '경기도 남양주시 평내동 평내유진마젤란', '집', 95, 0, ?)
+            VALUES (?, 37.643421, 127.236018, 10.0, '경기도 남양주시 평내로 89 (평내동, 평내마젤란21아파트)', '집', 95, 0, ?)
             """, (parent, now_kst))
+
+    # 기존 DB의 이전 기준점 좌표가 남아있을 경우 최신 평내마젤란21 정밀 좌표로 보정
+    cursor.execute("""
+    UPDATE user_locations 
+    SET latitude = 37.643421, longitude = 127.236018, address = '경기도 남양주시 평내로 89 (평내동, 평내마젤란21아파트)'
+    WHERE latitude > 37.6434 AND latitude < 37.6435 AND longitude < 127.232
+    """)
 
     # 초기 가족 전체 채팅 환영 메시지
     cursor.execute("SELECT COUNT(*) FROM chat_messages")

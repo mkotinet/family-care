@@ -1,0 +1,176 @@
+{
+  "backend/config.py": {
+    "mtime": 1795290710.3159382,
+    "seen": 1795291416.1539671,
+    "ast_hash": "41f5f01f5d4a1827e12c5a42c805580d",
+    "semantic_hash": ""
+  },
+  "backend/coords.py": {
+    "mtime": 1795249257.9083216,
+    "seen": 1795291416.1539688,
+    "ast_hash": "9b4e4cf0130dd62fd3f46d2a9be762fb",
+    "semantic_hash": ""
+  },
+  "backend/database.py": {
+    "mtime": 1795290981.5830364,
+    "seen": 1795291416.15397,
+    "ast_hash": "3fd6b76b7579ec167a2012c5c229c3c9",
+    "semantic_hash": ""
+  },
+  "backend/main.py": {
+    "mtime": 1795287566.7696714,
+    "seen": 1795291416.153971,
+    "ast_hash": "d19216acd51b9a1bb064f3992f0701ae",
+    "semantic_hash": ""
+  },
+  "backend/mock_data.py": {
+    "mtime": 1795220308.53681,
+    "seen": 1795291416.153972,
+    "ast_hash": "aec90771512fb5969bdfc7adf5f0f995",
+    "semantic_hash": ""
+  },
+  "backend/services/auth.py": {
+    "mtime": 1795253104.7651598,
+    "seen": 1795291416.153973,
+    "ast_hash": "18bfa8a6e229cd1530ddafe95bbcdc7f",
+    "semantic_hash": ""
+  },
+  "backend/services/chat.py": {
+    "mtime": 1795249187.86632,
+    "seen": 1795291416.153974,
+    "ast_hash": "0c5ef7b4ee72211cddcc7e57640449b5",
+    "semantic_hash": ""
+  },
+  "backend/services/culture.py": {
+    "mtime": 1795290971.3992126,
+    "seen": 1795291416.153975,
+    "ast_hash": "d3669f81ca911cebc2045ab38859eaf5",
+    "semantic_hash": ""
+  },
+  "backend/services/health.py": {
+    "mtime": 1795247853.3210473,
+    "seen": 1795291416.153976,
+    "ast_hash": "47a7b7a1f69363daf82b027be5a0ca54",
+    "semantic_hash": ""
+  },
+  "backend/services/hospital.py": {
+    "mtime": 1795247797.8210251,
+    "seen": 1795291416.153978,
+    "ast_hash": "d90a009ff96905812bb05ba5e6965906",
+    "semantic_hash": ""
+  },
+  "backend/services/location.py": {
+    "mtime": 1795290958.2835014,
+    "seen": 1795291416.1539788,
+    "ast_hash": "e4992c0c73cde9a7b6c9111a7aa666bc",
+    "semantic_hash": ""
+  },
+  "backend/services/places.py": {
+    "mtime": 1795281757.7082891,
+    "seen": 1795291416.15398,
+    "ast_hash": "51eee54a3805f55ed3b90f357e34a299",
+    "semantic_hash": ""
+  },
+  "backend/services/restaurant.py": {
+    "mtime": 1795290964.9277,
+    "seen": 1795291416.153981,
+    "ast_hash": "156a2af80e08336f824bb2d33663d82b",
+    "semantic_hash": ""
+  },
+  "backend/services/transit.py": {
+    "mtime": 1795290739.8525164,
+    "seen": 1795291416.153982,
+    "ast_hash": "9089364c47717345f840f40023b166d3",
+    "semantic_hash": ""
+  },
+  "backend/services/weather.py": {
+    "mtime": 1795277124.628647,
+    "seen": 1795291416.1539829,
+    "ast_hash": "a9464ed4d2dee2c6da695e8fd622ea29",
+    "semantic_hash": ""
+  },
+  "docker-compose.yml": {
+    "mtime": 1795220486.761525,
+    "seen": 1795291416.153984,
+    "ast_hash": "58466335efe701715c43e44ef0453106",
+    "semantic_hash": ""
+  },
+  "frontend/static/app.js": {
+    "mtime": 1795291053.0221825,
+    "seen": 1795291416.153985,
+    "ast_hash": "bc6d5bc00c2f7b1b256fed1c190f4d3e",
+    "semantic_hash": ""
+  },
+  "frontend/static/manifest.json": {
+    "mtime": 1795278482.114333,
+    "seen": 1795291416.1539872,
+    "ast_hash": "60166b7607ccb4c293ad58b70b60a70f",
+    "semantic_hash": ""
+  },
+  "frontend/static/sw.js": {
+    "mtime": 1795291173.3264387,
+    "seen": 1795291416.1539881,
+    "ast_hash": "5ccc8015c11fb71075c338997a93ca27",
+    "semantic_hash": ""
+  },
+  "version.json": {
+    "mtime": 1795291143.2068417,
+    "seen": 1795291416.153989,
+    "ast_hash": "c3061f214b0e42e03d403e4f533edfa1",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1795220502.7369287,
+    "seen": 1795291416.1539898,
+    "ast_hash": "9f5cb1e21d9110dfd1dc05b1c1903001",
+    "semantic_hash": ""
+  },
+  "frontend/static/index.html": {
+    "mtime": 1795291167.5916393,
+    "seen": 1795291416.153991,
+    "ast_hash": "ce4f7cdc196a1cefc343a2331eb03e76",
+    "semantic_hash": ""
+  },
+  "requirements.txt": {
+    "mtime": 1795220474.357841,
+    "seen": 1795291416.153992,
+    "ast_hash": "d9b89a8ee9d5b8a0e66adff37a06ad78",
+    "semantic_hash": ""
+  },
+  "\uae30\uc220\ub808\ud3ec\ud2b8.md": {
+    "mtime": 1795291402.4522946,
+    "seen": 1795291416.153993,
+    "ast_hash": "3c61481052345fbef7fc9742c7a44336",
+    "semantic_hash": ""
+  },
+  "\uc81c\uc791\ud788\uc2a4\ud1a0\ub9ac.md": {
+    "mtime": 1795291402.4525895,
+    "seen": 1795291416.153995,
+    "ast_hash": "09e5195d429a39de0c2caa0f95912893",
+    "semantic_hash": ""
+  },
+  "\ud2b8\ub7ec\ube14\uc288\ud305.md": {
+    "mtime": 1795291356.796874,
+    "seen": 1795291416.153996,
+    "ast_hash": "a0ac385cc1d0f28d5898a0fd8c723d66",
+    "semantic_hash": ""
+  },
+  "frontend/static/icons/apple-touch-icon.png": {
+    "mtime": 1795252750.0214114,
+    "seen": 1795291416.153997,
+    "ast_hash": "7f55154cd5817df4bebb2a72cc7b711c",
+    "semantic_hash": ""
+  },
+  "frontend/static/icons/icon-192.png": {
+    "mtime": 1795252749.757772,
+    "seen": 1795291416.1539981,
+    "ast_hash": "683ea6461420e4659d6b462d5a16406c",
+    "semantic_hash": ""
+  },
+  "frontend/static/icons/icon-512.png": {
+    "mtime": 1795252749.9913719,
+    "seen": 1795291416.153999,
+    "ast_hash": "abaddd36b88ff2f92d82e97ea6fc9004",
+    "semantic_hash": ""
+  }
+}

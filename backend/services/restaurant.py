@@ -88,7 +88,7 @@ async def update_favorite_restaurant(restaurant_id: int, name: str = None, categ
     conn.close()
     return True
 
-async def search_places_kakao(query: str = "맛집", lat: float = 37.6434558, lon: float = 127.2311716, radius: int = 4000):
+async def search_places_kakao(query: str = "맛집", lat: float = 37.643421, lon: float = 127.236018, radius: int = 4000):
     clean_q = (query or "맛집").strip()
     cache_key = f"kakao_places_{clean_q}_{round(lat, 3)}_{round(lon, 3)}"
     cached = get_cached_data(cache_key)

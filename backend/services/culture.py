@@ -9,7 +9,7 @@ from backend.mock_data import get_simulated_culture
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
-async def get_culture_and_crowd(lat: float = 37.6434558, lon: float = 127.2311716, scope: str = "local"):
+async def get_culture_and_crowd(lat: float = 37.643421, lon: float = 127.236018, scope: str = "local"):
     cache_key = f"culture_crowd_{scope}_v3"
     cached = get_cached_data(cache_key)
     if cached:

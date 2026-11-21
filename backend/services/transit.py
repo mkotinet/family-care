@@ -15,28 +15,28 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
     if cached:
         return cached
 
-    # 평내·호평 핵심 거점 정류소 12대 기본 탑재 (카카오버스 공식 명칭 및 양방향 ARS-ID 100% 일치)
+    # 평내·호평 핵심 거점 정류소 12대 기본 탑재 (카카오버스 맵 실측 좌표 및 공식 명칭·양방향 ARS-ID 100% 일치)
     core_stops = [
-        # 1. 평내화성.유진아파트 (유진몬테소리어린이집 앞 - 호평동 방면)
+        # 1. 평내화성.유진아파트 (유진몬테소리어린이집 앞 1308동 도로변 - 호평동 방면)
         {
             "id": "23453",
             "name": "평내화성.유진아파트",
             "full_name": "평내화성.유진아파트 (23453)",
-            "address": "경기 남양주시 평내동 624 (유진몬테소리어린이집 앞)",
-            "latitude": 37.643720,
-            "longitude": 127.231200,
+            "address": "경기 남양주시 평내로 89 (유진몬테소리어린이집 앞)",
+            "latitude": 37.642380,
+            "longitude": 127.235250,
             "direction": "hopyeong",
             "next_station": "평내신명.대주.금호아파트 방면",
             "ars_id": "23453"
         },
-        # 2. 평내화성.유진아파트 (화성파크힐즈아파트 앞 건너편 - 서울/청량리/잠실 방면)
+        # 2. 평내화성.유진아파트 (화성파크힐즈 1701동 CU 및 평내4호공원 앞 - 서울/청량리/잠실 방면)
         {
             "id": "23454",
             "name": "평내화성.유진아파트",
             "full_name": "평내화성.유진아파트 (23454)",
-            "address": "경기 남양주시 평내동 623 (화성파크힐즈 건너편)",
-            "latitude": 37.643400,
-            "longitude": 127.231700,
+            "address": "경기 남양주시 평내로 72 (화성파크힐즈 CU 앞)",
+            "latitude": 37.642150,
+            "longitude": 127.235650,
             "direction": "seoul",
             "next_station": "평내동주민센터.남양주소방서 방면",
             "ars_id": "23454"
@@ -46,9 +46,9 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
             "id": "23455",
             "name": "평내신명.대주.금호아파트",
             "full_name": "평내신명.대주.금호아파트 (23455)",
-            "address": "경기 남양주시 평내로 125",
-            "latitude": 37.644600,
-            "longitude": 127.233400,
+            "address": "경기 남양주시 평내로 115 (평내2차대주 앞)",
+            "latitude": 37.643800,
+            "longitude": 127.238500,
             "direction": "hopyeong",
             "next_station": "평내중흥.유라.삼창아파트 방면",
             "ars_id": "23455"
@@ -58,9 +58,9 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
             "id": "23456",
             "name": "평내신명.대주.금호아파트",
             "full_name": "평내신명.대주.금호아파트 (23456)",
-            "address": "경기 남양주시 평내로 126",
-            "latitude": 37.644350,
-            "longitude": 127.233600,
+            "address": "경기 남양주시 평내로 116",
+            "latitude": 37.643650,
+            "longitude": 127.238700,
             "direction": "seoul",
             "next_station": "평내화성.유진아파트 방면",
             "ars_id": "23456"
@@ -70,9 +70,9 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
             "id": "23457",
             "name": "평내중흥.유라.삼창아파트",
             "full_name": "평내중흥.유라.삼창아파트 (23457)",
-            "address": "경기 남양주시 평내로 85",
-            "latitude": 37.642600,
-            "longitude": 127.235600,
+            "address": "경기 남양주시 평내로 150 (중흥S클래스1단지 앞)",
+            "latitude": 37.646500,
+            "longitude": 127.241600,
             "direction": "hopyeong",
             "next_station": "평내호평역 방면",
             "ars_id": "23457"
@@ -82,9 +82,9 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
             "id": "23458",
             "name": "평내중흥.유라.삼창아파트",
             "full_name": "평내중흥.유라.삼창아파트 (23458)",
-            "address": "경기 남양주시 평내로 86",
-            "latitude": 37.642350,
-            "longitude": 127.235800,
+            "address": "경기 남양주시 평내로 151",
+            "latitude": 37.646300,
+            "longitude": 127.241800,
             "direction": "seoul",
             "next_station": "평내신명.대주.금호아파트 방면",
             "ars_id": "23458"

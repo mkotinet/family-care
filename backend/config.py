@@ -36,11 +36,11 @@ if not Path(DB_PATH).parent.exists():
     DB_PATH = DEFAULT_DB
     (BASE_DIR / "data").mkdir(parents=True, exist_ok=True)
 
-# 기본 위치 설정 (남양주시 평내동 평내유진마젤란아파트)
+# 기본 위치 설정 (남양주시 평내동 평내마을유진마젤란21아파트 1306/1307동 실측 정밀 좌표)
 DEFAULT_LOCATION = {
-    "lat": float(os.getenv("DEFAULT_LAT", 37.6434558)),
-    "lon": float(os.getenv("DEFAULT_LON", 127.2311716)),
-    "address": os.getenv("DEFAULT_ADDRESS", "경기도 남양주시 평내동 평내유진마젤란"),
+    "lat": float(os.getenv("DEFAULT_LAT", 37.643421)),
+    "lon": float(os.getenv("DEFAULT_LON", 127.236018)),
+    "address": os.getenv("DEFAULT_ADDRESS", "경기도 남양주시 평내로 89 (평내동, 평내마젤란21아파트)"),
     "region_name": "남양주시 평내동",
     "grid_x": 64,
     "grid_y": 128

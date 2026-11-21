@@ -1,10 +1,12 @@
+import urllib.request
+import urllib.parse
+import json
 from backend.config import DATA_GO_KR_API_KEY
 from backend.database import get_db_connection, get_cached_data, set_cached_data
 from backend.mock_data import get_simulated_transit
 
 async def get_transit_routes():
-    # 30초 초단기 캐싱 (교통 정보 실시간성 보장)
-    cache_key = "transit_routes_all"
+    cache_key = "transit_routes_real_v2"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
@@ -20,25 +22,70 @@ async def get_transit_routes():
     rows = cursor.fetchall()
     conn.close()
 
-    # DB에 등록된 루트가 있으면 그것을 기반으로 실시간 도착정보 조합
     simulated = get_simulated_transit()
     results = []
 
     for i, row in enumerate(rows):
         sim = simulated[i % len(simulated)]
+        r_type = row["transit_type"]
+        node_id = row["station_id"] or "GGB222000570"
+        route_no = str(row["route_no"])
+
+        remain_time = sim["remain_time"]
+        remain_stops = sim["remain_stops"]
+        crowded_level = sim["crowded_level"]
+        badge_color = sim["badge_color"]
+
+        # TAGO 버스 실시간 API 조회
+        if DATA_GO_KR_API_KEY and r_type == "BUS":
+            try:
+                url = "http://apis.data.go.kr/1613000/ArvlInfoInqireService/getSttnAcctoArvlPrearngeInfoList"
+                params = {
+                    "serviceKey": DATA_GO_KR_API_KEY,
+                    "cityCode": "31130",  # 남양주시
+                    "nodeId": node_id,
+                    "numOfRows": "20",
+                    "pageNo": "1",
+                    "_type": "json"
+                }
+                req = urllib.request.Request(f"{url}?{urllib.parse.urlencode(params)}")
+                with urllib.request.urlopen(req, timeout=4) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+                    if isinstance(items, dict):
+                        items = [items]
+
+                    # 등록된 노선 번호와 매칭
+                    matched = None
+                    for it in items:
+                        if str(it.get("routeno")) == route_no or route_no in str(it.get("routeno")):
+                            matched = it
+                            break
+
+                    if matched:
+                        sec = int(matched.get("arrtime", 0))
+                        mins = max(1, sec // 60)
+                        cnt = matched.get("arrprevstationcnt", 1)
+                        v_type = matched.get("vehicletp", "일반")
+                        remain_time = f"{mins}분 후 도착"
+                        remain_stops = f"{cnt}정거장 전 ({v_type})"
+                        badge_color = "#10b981" if mins <= 5 else "#3b82f6"
+            except Exception:
+                pass  # 실패 시 시뮬레이션 데이터 유지
+
         results.append({
             "id": row["id"],
             "member_name": row["member_name"] or "가족공용",
             "title": row["title"],
-            "transit_type": row["transit_type"],
-            "station_id": row["station_id"],
+            "transit_type": r_type,
+            "station_id": node_id,
             "station_name": row["station_name"],
             "route_no": row["route_no"],
             "destination": row["target_destination"],
-            "remain_time": sim["remain_time"],
-            "remain_stops": sim["remain_stops"],
-            "crowded_level": sim["crowded_level"],
-            "badge_color": sim["badge_color"]
+            "remain_time": remain_time,
+            "remain_stops": remain_stops,
+            "crowded_level": crowded_level,
+            "badge_color": badge_color
         })
 
     if not results:

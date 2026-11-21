@@ -1,20 +1,39 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+env_file = BASE_DIR / ".env"
+
+# .env 파일 로딩 (빈 환경변수 덮어쓰기 보장)
+if env_file.exists():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_file, override=True)
+    except Exception:
+        pass
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, val = line.split("=", 1)
+            k = key.strip()
+            v = val.strip()
+            if not os.environ.get(k):
+                os.environ[k] = v
 
 # 포트 및 환경 설정
 PORT = int(os.getenv("PORT", 8000))
 ENV = os.getenv("ENV", "development")
 
-# 공공데이터포털 및 카카오 API 키 (미설정 시 스마트 시뮬레이션 모드 활성화)
+# 공공데이터포털 및 카카오 API 키
 DATA_GO_KR_API_KEY = os.getenv("DATA_GO_KR_API_KEY", "").strip()
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY", "").strip()
 
-# 데이터베이스 경로 (도커 볼륨 /app/data 대응)
-DB_PATH = os.getenv("DB_PATH", str(BASE_DIR / "data" / "family_care.db"))
+# 데이터베이스 경로 (도커 볼륨 /app/data 대응, 로컬 폴백)
+DEFAULT_DB = str(BASE_DIR / "data" / "family_care.db")
+DB_PATH = os.getenv("DB_PATH", DEFAULT_DB)
+if not Path(DB_PATH).parent.exists():
+    DB_PATH = DEFAULT_DB
+    (BASE_DIR / "data").mkdir(parents=True, exist_ok=True)
 
 # 기본 위치 설정 (남양주시 평내동 평내유진마젤란아파트)
 DEFAULT_LOCATION = {

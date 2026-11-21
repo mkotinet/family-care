@@ -1,13 +1,14 @@
 import os
+import json
 from pathlib import Path
 from datetime import datetime
 import zoneinfo
-from fastapi import FastAPI, Request, Query, Body, Header
+from fastapi import FastAPI, Request, Query, Body, Header, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.config import DEFAULT_LOCATION, APP_TITLE, APP_SUBTITLE, TIMEZONE, PORT
+from backend.config import DEFAULT_LOCATION, APP_TITLE, APP_SUBTITLE, TIMEZONE, PORT, KAKAO_JS_API_KEY, KAKAO_REST_API_KEY
 from backend.database import init_db
 from backend.services.auth import authenticate_user, get_user_by_token, get_family_members_list
 from backend.services.location import update_user_location, get_family_locations
@@ -58,9 +59,34 @@ async def health_check():
         "timezone": TIMEZONE
     }
 
+@app.get("/api/version")
+async def get_app_version():
+    """하루퀴즈 포맷: version.json 기반 동적 버전 메타데이터 (Cache-Control: no-cache)"""
+    v_file = BASE_DIR / "version.json"
+    default_meta = {
+        "version": "1.1.0",
+        "build": "20261121_1740",
+        "name": "우리가족챙기기",
+        "releaseNotes": "1) 최신 페이지 자동 업데이트 & 업데이트 안내창 탑재\n2) 카카오맵/오픈스트리트맵 무장애 하이브리드 지도 엔진 탑재"
+    }
+    if v_file.exists():
+        try:
+            with open(v_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return JSONResponse(
+                    content=data,
+                    headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+                )
+        except Exception:
+            pass
+    return JSONResponse(
+        content=default_meta,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
+
 @app.get("/api/init")
 async def get_app_init(authorization: str = Header(None)):
-    """초기 앱 로드: 가족 4인 정보, 기본 거점, 서버시간 전달"""
+    """초기 앱 로드: 가족 4인 정보, 기본 거점, 서버시간, 카카오 SDK 연동 상태 전달"""
     members = await get_family_members_list()
     now_kst = datetime.now(KST)
 
@@ -75,6 +101,8 @@ async def get_app_init(authorization: str = Header(None)):
         "default_location": DEFAULT_LOCATION,
         "family_members": members,
         "current_user": current_user,
+        "kakao_js_key": KAKAO_JS_API_KEY,
+        "has_kakao_rest_key": bool(KAKAO_REST_API_KEY),
         "server_time": now_kst.isoformat(),
         "kst_date_string": now_kst.strftime("%Y년 %m월 %d일"),
         "kst_day_name": ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"][now_kst.weekday()],

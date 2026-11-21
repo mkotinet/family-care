@@ -27,6 +27,7 @@ ENV = os.getenv("ENV", "development")
 # 공공데이터포털 및 카카오 API 키
 DATA_GO_KR_API_KEY = os.getenv("DATA_GO_KR_API_KEY", "").strip()
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY", "").strip()
+KAKAO_JS_API_KEY = os.getenv("KAKAO_JS_API_KEY", "").strip()
 
 # 데이터베이스 경로 (도커 볼륨 /app/data 대응, 로컬 폴백)
 DEFAULT_DB = str(BASE_DIR / "data" / "family_care.db")

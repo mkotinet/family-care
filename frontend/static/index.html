@@ -9,9 +9,11 @@
   <meta name="theme-color" content="#f8fafc">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="app-version" content="1.1.0">
 
-  <!-- 카카오 지도 JavaScript SDK -->
-  <script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=fe86008d3b62bd991fca8c1dd38d15de&libraries=services"></script>
+  <!-- Leaflet 오픈스트리트맵 엔진 (카카오맵 인증/로딩 실패 시 즉시 자동 폴백) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
   <div class="app-container">
@@ -248,9 +250,13 @@
         </div>
       </div>
 
-      <!-- 지도 뷰 컨테이너 (카카오맵 연동) -->
+      <!-- 지도 뷰 컨테이너 (스마트 하이브리드 지도) -->
       <div class="sheet-map-wrapper" id="sheetMapWrapper" style="display: none;">
-        <div id="kakaoCategoryMap" style="width: 100%; height: 260px; border-radius: 14px;"></div>
+        <div class="map-engine-bar">
+          <span class="map-engine-pill" id="catMapEngineBadge">🌐 오픈스트리트맵 엔진 작동 중</span>
+          <button class="btn-map-setting" onclick="openKakaoKeyModal()">🔑 카카오 JS키 설정</button>
+        </div>
+        <div id="kakaoCategoryMap" style="width: 100%; height: 260px; border-radius: 14px; position: relative; z-index: 1;"></div>
         <div class="map-helper-text" id="mapHelperText">📍 지도의 마커를 터치하여 위치를 확인하고 즐겨찾기에 등록하세요.</div>
       </div>
 
@@ -272,7 +278,11 @@
       </div>
 
       <div class="safety-map-container">
-        <div id="kakaoSafetyMap" style="width: 100%; height: 280px; border-radius: 14px;"></div>
+        <div class="map-engine-bar">
+          <span class="map-engine-pill" id="safetyMapEngineBadge">🌐 오픈스트리트맵 엔진 작동 중</span>
+          <button class="btn-map-setting" onclick="openKakaoKeyModal()">🔑 카카오 JS키 설정</button>
+        </div>
+        <div id="kakaoSafetyMap" style="width: 100%; height: 280px; border-radius: 14px; position: relative; z-index: 1;"></div>
       </div>
 
       <!-- 아이들 위치 카드 목록 -->
@@ -379,6 +389,67 @@
           <button onclick="closeRouteModal()" class="btn-secondary" style="padding: 10px 16px;">취소</button>
           <button onclick="saveTransitRoute()" class="btn-primary" style="padding: 10px 16px;">즐겨찾기 저장</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 11. [모달] 하루퀴즈 포맷: 업데이트 소식창 (What's New Modal) -->
+  <div class="modal-overlay" id="modalWhatsNew" onclick="closeWhatsNewModal(event)">
+    <div class="modal-content whats-new-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span>🎉</span> 우리가족챙기기 <span id="whatsNewVersionBadge" class="version-badge">v1.1.0</span> 업데이트 소식
+        </div>
+        <button class="sheet-close-btn" onclick="closeWhatsNewModal()">✕</button>
+      </div>
+
+      <div class="whats-new-body">
+        <div class="whats-new-hero">
+          <div class="hero-icons">🌿📲🗺️🛡️💬✨</div>
+          <div class="hero-title" id="whatsNewHeroTitle">
+            자동 업데이트 & 무장애 하이브리드 지도 엔진 탑재!
+          </div>
+          <div class="release-notes-box">
+            <div class="notes-header">📌 이번 버전 릴리스 노트</div>
+            <p id="whatsNewReleaseDesc" class="notes-text">
+              1) 업데이트 시 최신 페이지 자동 업데이트 & 업데이트 안내창 탑재<br>
+              2) 카카오맵/오픈스트리트맵 무장애 하이브리드 지도 엔진 탑재<br>
+              3) 3단 날씨(1시간/3시간/주간) 및 4인 가족 안심 위치 & 실시간 가족톡
+            </p>
+          </div>
+        </div>
+
+        <div class="update-card-list" id="whatsNewFeatureList">
+          <!-- 주요 기능 카드 목록 동적 주입 -->
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; gap: 8px; justify-content: space-between; margin-top: 16px;">
+        <button onclick="dismissWhatsNewForever()" class="btn-secondary" style="font-size: 12px; padding: 10px 14px;">
+          다시 보지 않기
+        </button>
+        <button onclick="closeWhatsNewModal()" class="btn-primary" style="padding: 10px 20px;">
+          확인했어요 ✨
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 12. [모달] 카카오 지도 JavaScript 키 설정 모달 -->
+  <div class="modal-overlay" id="modalKakaoKeySetting" onclick="closeKakaoKeyModal(event)">
+    <div class="modal-content" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="modal-title"><span>🔑</span> 카카오 JavaScript 키 설정</div>
+        <button class="sheet-close-btn" onclick="closeKakaoKeyModal()">✕</button>
+      </div>
+      <p style="font-size: 13px; color: #64748b; margin-bottom: 12px; line-height: 1.5;">
+        카카오 개발자 콘솔의 <strong>[앱 키] &gt; [JavaScript 키]</strong>를 등록하시면 카카오 지도로 동작합니다.<br>
+        (미등록 시에도 오픈스트리트맵으로 100% 정상 작동합니다)
+      </p>
+      <input type="text" id="inputKakaoJsKey" placeholder="예: 32자리 카카오 JavaScript 키" style="width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #cbd5e1; margin-bottom: 12px;">
+      <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <button onclick="closeKakaoKeyModal()" class="btn-secondary" style="padding: 8px 14px;">닫기</button>
+        <button onclick="saveKakaoJsKey()" class="btn-primary" style="padding: 8px 16px;">저장 및 적용</button>
       </div>
     </div>
   </div>

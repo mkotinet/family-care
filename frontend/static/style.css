@@ -1057,3 +1057,141 @@ body {
   font-weight: 700;
   cursor: pointer;
 }
+
+/* ============================================================
+   What's New & Update Notice Modal (하루퀴즈 스타일)
+   ============================================================ */
+.whats-new-card {
+  max-width: 480px;
+  width: 92%;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+}
+
+.version-badge {
+  display: inline-block;
+  background: linear-gradient(135deg, #0ea5e9, #3b82f6);
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  margin-left: 4px;
+}
+
+.whats-new-hero {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.hero-icons {
+  font-size: 28px;
+  margin-bottom: 6px;
+  letter-spacing: 2px;
+}
+
+.hero-title {
+  font-weight: 900;
+  font-size: 15px;
+  color: #0f172a;
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+
+.release-notes-box {
+  background: #f0fdf4;
+  border: 1px dashed #86efac;
+  border-radius: 12px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.notes-header {
+  font-size: 11px;
+  font-weight: 800;
+  color: #15803d;
+  margin-bottom: 4px;
+}
+
+.notes-text {
+  font-size: 12px;
+  color: #334155;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-line;
+}
+
+.update-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.update-feature-card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.update-card-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.update-card-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1e293b;
+  margin-bottom: 2px;
+}
+
+.update-card-desc {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+/* 지도 엔진 전환 및 상태 바 */
+.map-engine-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border-radius: 8px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.map-engine-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #0369a1;
+}
+
+.btn-map-setting {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* Leaflet 팝업 커스텀 */
+.leaflet-popup-content-wrapper {
+  border-radius: 12px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+}

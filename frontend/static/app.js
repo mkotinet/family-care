@@ -5,9 +5,15 @@
 
 // 전역 상태
 const AppState = {
+  APP_VERSION: document.querySelector('meta[name="app-version"]')?.getAttribute('content') || '1.1.0',
+  versionMeta: null,
+  isCheckingVersion: false,
+  lastVersionCheckTime: 0,
   currentUser: null,       // 현재 로그인 유저 { username, name, role_title, role_type, avatar }
   token: null,
   familyMembers: [],       // 4인 공식 가족 회원
+  kakao_js_key: "",
+  mapEngine: "leaflet",    // 'kakao' or 'leaflet'
   location: {
     lat: 37.6434558,
     lon: 127.2311716,
@@ -18,8 +24,10 @@ const AppState = {
   currentCategory: null,
   detailViewMode: "list",  // 'list' or 'map'
   kakaoCategoryMap: null,
+  leafletCategoryMap: null,
   categoryMarkers: [],
   kakaoSafetyMap: null,
+  leafletSafetyMap: null,
   safetyMarkers: [],
   currentChatRoom: "family_all",
   chatPollingTimer: null,
@@ -34,6 +42,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   setupMobileLifecycle();
   await loadStoredSession();
   await initApp();
+
+  // 최신 버전 감지 및 업데이트 팝업 (하루퀴즈 메커니즘)
+  await checkAppVersionUpdate(true);
+  await checkWhatsNewPopup();
+
+  // 주기적 버전 체크 (30초 주기)
+  setInterval(() => {
+    checkAppVersionUpdate(false);
+  }, 30000);
 
   // 자녀 계정일 경우 자동 GPS 위치 추적 리포트 가동
   if (AppState.currentUser && AppState.currentUser.role_type === "CHILD") {
@@ -63,12 +80,17 @@ function setupMobileLifecycle() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       refreshData();
+      checkAppVersionUpdate(false);
     }
   });
   window.addEventListener("pageshow", (e) => {
     if (e.persisted) {
       refreshData();
+      checkAppVersionUpdate(false);
     }
+  });
+  window.addEventListener("focus", () => {
+    checkAppVersionUpdate(false);
   });
 }
 
@@ -130,6 +152,9 @@ async function initApp() {
     if (data.default_location) {
       AppState.location = data.default_location;
     }
+    if (data.kakao_js_key) {
+      AppState.kakao_js_key = data.kakao_js_key;
+    }
 
     // 4인 가족 정보 렌더링
     renderFamilyLoginGrid();
@@ -151,6 +176,210 @@ async function refreshData() {
     loadFavorites(),
     checkChildSafetySummary()
   ]);
+}
+
+// ============================================================
+// 1-1. 앱 버전 감지 및 자동 업데이트 엔진 (하루퀴즈 메커니즘 연동)
+// ============================================================
+function isServerVersionNewer(serverVer, clientVer) {
+  if (!serverVer || !clientVer) return false;
+  const sClean = String(serverVer).replace(/^v/i, '').trim();
+  const cClean = String(clientVer).replace(/^v/i, '').trim();
+  if (sClean === cClean) return false;
+
+  const sParts = sClean.split('.').map(n => parseInt(n, 10) || 0);
+  const cParts = cClean.split('.').map(n => parseInt(n, 10) || 0);
+  const maxLen = Math.max(sParts.length, cParts.length);
+
+  for (let i = 0; i < maxLen; i++) {
+    const s = sParts[i] || 0;
+    const c = cParts[i] || 0;
+    if (s > c) return true;
+    if (s < c) return false;
+  }
+  return false;
+}
+
+async function checkAppVersionUpdate(force = false) {
+  if (AppState.isCheckingVersion) return;
+  const now = Date.now();
+  if (!force && (now - AppState.lastVersionCheckTime < 15000)) return;
+
+  AppState.isCheckingVersion = true;
+  AppState.lastVersionCheckTime = now;
+
+  try {
+    const res = await fetch('/api/version?_t=' + now, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' }
+    });
+    if (!res.ok) return;
+
+    const data = await res.json();
+    if (!data || !data.version) return;
+
+    AppState.versionMeta = data;
+    const serverVersion = data.version;
+    const clientVersion = AppState.APP_VERSION;
+
+    if (isServerVersionNewer(serverVersion, clientVersion)) {
+      console.log(`[Family Care] New version detected! Server: v${serverVersion}, Client: v${clientVersion}`);
+
+      const guardKey = 'family_auto_reload_to_' + serverVersion;
+      const lastReloadAttempt = parseInt(sessionStorage.getItem(guardKey) || '0', 10);
+      if (now - lastReloadAttempt < 60000) {
+        console.warn('[Family Care] Auto-reload already attempted recently for v' + serverVersion);
+        return;
+      }
+      sessionStorage.setItem(guardKey, String(now));
+
+      showToastNotice(`🚀 새 버전(v${serverVersion})으로 업데이트되었습니다. 최신 화면으로 새로고침합니다...`);
+
+      setTimeout(() => {
+        window.location.reload(true);
+      }, 800);
+    }
+  } catch (err) {
+    console.warn('[Family Care] Version check failed:', err);
+  } finally {
+    AppState.isCheckingVersion = false;
+  }
+}
+
+// What's New 팝업
+async function checkWhatsNewPopup() {
+  let currentVer = AppState.APP_VERSION;
+  try {
+    if (!AppState.versionMeta) {
+      const res = await fetch('/api/version?_t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        AppState.versionMeta = await res.json();
+        if (AppState.versionMeta && AppState.versionMeta.version) {
+          currentVer = AppState.versionMeta.version;
+        }
+      }
+    }
+  } catch (e) {}
+
+  const dismissedVersion = localStorage.getItem('family_dismissed_update_version');
+  if (dismissedVersion === currentVer) {
+    return; // 이미 이번 버전을 확인하고 닫음
+  }
+
+  openWhatsNewModal();
+}
+
+function openWhatsNewModal() {
+  const modal = document.getElementById('modalWhatsNew');
+  if (!modal) return;
+
+  const currentVer = (AppState.versionMeta && AppState.versionMeta.version) || AppState.APP_VERSION;
+  const badge = document.getElementById('whatsNewVersionBadge');
+  if (badge) badge.textContent = `v${currentVer}`;
+
+  const descEl = document.getElementById('whatsNewReleaseDesc');
+  if (descEl && AppState.versionMeta && AppState.versionMeta.releaseNotes) {
+    descEl.innerText = AppState.versionMeta.releaseNotes;
+  }
+
+  const listEl = document.getElementById('whatsNewFeatureList');
+  if (listEl && AppState.versionMeta && AppState.versionMeta.features) {
+    listEl.innerHTML = AppState.versionMeta.features.map(f => `
+      <div class="update-feature-card">
+        <div class="update-card-icon">${f.icon}</div>
+        <div class="update-card-content">
+          <div class="update-card-title">${f.title}</div>
+          <div class="update-card-desc">${f.desc}</div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  modal.className = 'modal-overlay active';
+}
+
+function closeWhatsNewModal(e) {
+  if (e && e.target && e.target.id !== "modalWhatsNew" && !e.target.classList.contains("sheet-close-btn") && !e.target.classList.contains("btn-primary")) {
+    return;
+  }
+  const modal = document.getElementById('modalWhatsNew');
+  if (modal) modal.className = 'modal-overlay';
+}
+
+function dismissWhatsNewForever() {
+  const currentVer = (AppState.versionMeta && AppState.versionMeta.version) || AppState.APP_VERSION;
+  try {
+    localStorage.setItem('family_dismissed_update_version', currentVer);
+  } catch (e) {}
+  closeWhatsNewModal();
+  showToastNotice(`📢 v${currentVer} 업데이트 알림을 더 이상 표시하지 않습니다.`);
+}
+
+// 간이 토스트 알림
+function showToastNotice(msg) {
+  let toast = document.getElementById('appToastNotice');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'appToastNotice';
+    toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:rgba(15,23,42,0.92);color:white;padding:12px 20px;border-radius:14px;font-size:13px;font-weight:700;z-index:9999;box-shadow:0 10px 25px rgba(0,0,0,0.25);transition:opacity 0.3s;pointer-events:none;text-align:center;max-width:90%;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  setTimeout(() => {
+    if (toast) toast.style.opacity = '0';
+  }, 3500);
+}
+
+// 카카오 키 설정 모달
+function openKakaoKeyModal() {
+  const modal = document.getElementById("modalKakaoKeySetting");
+  const input = document.getElementById("inputKakaoJsKey");
+  if (modal) modal.className = "modal-overlay active";
+  if (input) input.value = getKakaoJsKey();
+}
+
+function closeKakaoKeyModal(e) {
+  if (e && e.target && e.target.id !== "modalKakaoKeySetting" && !e.target.classList.contains("sheet-close-btn") && !e.target.classList.contains("btn-secondary")) {
+    return;
+  }
+  const modal = document.getElementById("modalKakaoKeySetting");
+  if (modal) modal.className = "modal-overlay";
+}
+
+function saveKakaoJsKey() {
+  const input = document.getElementById("inputKakaoJsKey");
+  if (!input) return;
+  const key = input.value.trim();
+  if (key) {
+    localStorage.setItem("family_kakao_js_key", key);
+    showToastNotice("🔑 카카오 JavaScript 키가 저장되었습니다. 지도를 새로고침합니다.");
+  } else {
+    localStorage.removeItem("family_kakao_js_key");
+    showToastNotice("🌐 카카오 키가 삭제되어 오픈스트리트맵 엔진으로 작동합니다.");
+  }
+  closeKakaoKeyModal();
+  kakaoSdkLoadingPromise = null;
+
+  if (AppState.detailViewMode === "map") {
+    initCategoryKakaoMap();
+  }
+}
+
+function getKakaoJsKey() {
+  return localStorage.getItem("family_kakao_js_key") || AppState.kakao_js_key || "";
+}
+
+function updateMapEngineBadge(badgeId) {
+  const el = document.getElementById(badgeId);
+  if (!el) return;
+  if (AppState.mapEngine === "kakao") {
+    el.innerHTML = "🗺️ 카카오 지도 엔진 작동 중";
+    el.style.color = "#d97706";
+  } else {
+    el.innerHTML = "🌐 오픈스트리트맵 엔진 작동 중";
+    el.style.color = "#0369a1";
+  }
 }
 
 // ==========================================
@@ -413,14 +642,166 @@ function switchDetailView(mode) {
   }
 }
 
-// 카카오 지도 렌더러
-function initCategoryKakaoMap() {
-  if (typeof kakao === "undefined" || !kakao.maps) {
-    document.getElementById("kakaoCategoryMap").innerHTML = '<div style="padding: 20px; text-align: center; color: #64748b;">카카오맵 SDK를 로딩 중입니다...</div>';
-    return;
+// ==========================================
+// 3. 스마트 하이브리드 지도 엔진 (카카오맵 & Leaflet 듀얼 연동)
+// ==========================================
+let kakaoSdkLoadingPromise = null;
+
+function loadKakaoSdk() {
+  if (typeof kakao !== "undefined" && kakao.maps && kakao.maps.Map) {
+    AppState.mapEngine = "kakao";
+    return Promise.resolve(true);
   }
 
+  const jsKey = getKakaoJsKey();
+  if (!jsKey) {
+    AppState.mapEngine = "leaflet";
+    return Promise.resolve(false);
+  }
+
+  if (kakaoSdkLoadingPromise) return kakaoSdkLoadingPromise;
+
+  kakaoSdkLoadingPromise = new Promise((resolve) => {
+    const existing = document.getElementById("kakaoMapsSdkScript");
+    if (existing) existing.remove();
+
+    const script = document.createElement("script");
+    script.id = "kakaoMapsSdkScript";
+    script.type = "text/javascript";
+    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${jsKey}&libraries=services&autoload=false`;
+
+    script.onload = () => {
+      try {
+        kakao.maps.load(() => {
+          AppState.mapEngine = "kakao";
+          resolve(true);
+        });
+      } catch (err) {
+        console.warn("kakao.maps.load error:", err);
+        AppState.mapEngine = "leaflet";
+        resolve(false);
+      }
+    };
+
+    script.onerror = (e) => {
+      console.warn("Kakao SDK script load error. Falling back to Leaflet:", e);
+      AppState.mapEngine = "leaflet";
+      resolve(false);
+    };
+
+    document.head.appendChild(script);
+
+    // 2.5초 타임아웃 방어 (네트워크 지연 시 즉시 오픈스트리트맵으로 표시)
+    setTimeout(() => {
+      if (typeof kakao === "undefined" || !kakao.maps || !kakao.maps.Map) {
+        AppState.mapEngine = "leaflet";
+        resolve(false);
+      }
+    }, 2500);
+  });
+
+  return kakaoSdkLoadingPromise;
+}
+
+// 카테고리 지도 렌더러
+async function initCategoryKakaoMap() {
   const container = document.getElementById("kakaoCategoryMap");
+  if (!container) return;
+
+  const kakaoReady = await loadKakaoSdk();
+  updateMapEngineBadge("catMapEngineBadge");
+
+  if (kakaoReady && typeof kakao !== "undefined" && kakao.maps && kakao.maps.Map) {
+    initKakaoCategoryMap(container);
+  } else {
+    initLeafletCategoryMap(container);
+  }
+}
+
+// Leaflet 카테고리 지도 (오픈스트리트맵)
+function initLeafletCategoryMap(container) {
+  if (AppState.leafletCategoryMap) {
+    try { AppState.leafletCategoryMap.remove(); } catch (e) {}
+    AppState.leafletCategoryMap = null;
+  }
+  container.innerHTML = "";
+
+  const map = L.map(container).setView([AppState.location.lat, AppState.location.lon], 15);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap'
+  }).addTo(map);
+
+  AppState.leafletCategoryMap = map;
+
+  // 우리 집 마커
+  const homeIcon = L.divIcon({
+    className: 'custom-home-pin',
+    html: '<div style="background:#0f172a;color:white;padding:4px 8px;border-radius:10px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:1px solid #ffffff;">🏡 우리 집 (평내유진마젤란)</div>',
+    iconSize: [60, 24],
+    iconAnchor: [30, 12]
+  });
+  L.marker([AppState.location.lat, AppState.location.lon], { icon: homeIcon })
+    .addTo(map)
+    .bindPopup('<b>🏡 우리 집</b><br>남양주시 평내동 평내유진마젤란');
+
+  renderLeafletCategoryMarkers(map);
+
+  setTimeout(() => {
+    map.invalidateSize();
+  }, 200);
+}
+
+function renderLeafletCategoryMarkers(map) {
+  if (!map) return;
+  const cat = AppState.currentCategory;
+
+  if (cat === "restaurant" && AppState.cachedPlaces) {
+    AppState.cachedPlaces.forEach((p, idx) => {
+      const pLat = AppState.location.lat + (Math.sin(idx + 1) * 0.005);
+      const pLon = AppState.location.lon + (Math.cos(idx + 1) * 0.005);
+      const icon = L.divIcon({
+        className: 'cat-marker-pin',
+        html: `<div style="background:#f97316;color:white;padding:3px 6px;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);">🍽️ ${p.name}</div>`,
+        iconSize: [70, 24],
+        iconAnchor: [35, 12]
+      });
+      const marker = L.marker([pLat, pLon], { icon }).addTo(map);
+      marker.bindPopup(`
+        <div style="font-size:12px;">
+          <b>🍽️ ${p.name}</b><br>
+          <span style="color:#64748b;">${p.address || ''}</span><br>
+          <span style="color:#0ea5e9;font-weight:700;">${p.phone || ''}</span><br>
+          <button onclick="quickAddFavoritePlace('식당', '${p.name}', '${p.address || ''}', '${p.phone || ''}', '${p.status_badge || ''}')" style="margin-top:6px;padding:4px 8px;background:#10b981;color:white;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">⭐ 즐겨찾기 등록</button>
+        </div>
+      `);
+    });
+  } else if (cat === "hospital" && AppState.cachedHospitals) {
+    AppState.cachedHospitals.forEach((h, idx) => {
+      const hLat = AppState.location.lat + (Math.cos(idx + 2) * 0.0045);
+      const hLon = AppState.location.lon + (Math.sin(idx + 2) * 0.0045);
+      const isPharm = (h.type === "약국");
+      const icon = L.divIcon({
+        className: 'cat-marker-pin',
+        html: `<div style="background:${isPharm ? '#10b981' : '#3b82f6'};color:white;padding:3px 6px;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);">${isPharm ? '💊' : '🏥'} ${h.name}</div>`,
+        iconSize: [70, 24],
+        iconAnchor: [35, 12]
+      });
+      const marker = L.marker([hLat, hLon], { icon }).addTo(map);
+      marker.bindPopup(`
+        <div style="font-size:12px;">
+          <b>${isPharm ? '💊' : '🏥'} ${h.name}</b> (${h.status_badge || ''})<br>
+          <span style="color:#64748b;">${h.address || ''}</span><br>
+          <span style="color:#0ea5e9;font-weight:700;">${h.phone || ''}</span><br>
+          <button onclick="quickAddFavoritePlace('${h.type}', '${h.name}', '${h.address || ''}', '${h.phone || ''}', '${h.status_badge || ''}')" style="margin-top:6px;padding:4px 8px;background:#10b981;color:white;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;">⭐ 즐겨찾기 등록</button>
+        </div>
+      `);
+    });
+  }
+}
+
+// 카카오 카테고리 지도
+function initKakaoCategoryMap(container) {
   const options = {
     center: new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon),
     level: 4
@@ -428,7 +809,6 @@ function initCategoryKakaoMap() {
 
   AppState.kakaoCategoryMap = new kakao.maps.Map(container, options);
 
-  // 내 거점 (평내유진마젤란) 중심 마커
   const homeMarker = new kakao.maps.Marker({
     position: new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon),
     map: AppState.kakaoCategoryMap
@@ -441,19 +821,17 @@ function initCategoryKakaoMap() {
   });
   homeOverlay.setMap(AppState.kakaoCategoryMap);
 
-  // 카테고리별 마커 렌더링
-  renderCategoryMarkersOnMap();
+  renderKakaoCategoryMarkers();
 
   setTimeout(() => {
     AppState.kakaoCategoryMap.relayout();
     AppState.kakaoCategoryMap.setCenter(new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon));
-  }, 100);
+  }, 200);
 }
 
-function renderCategoryMarkersOnMap() {
+function renderKakaoCategoryMarkers() {
   if (!AppState.kakaoCategoryMap) return;
 
-  // 기존 마커 제거
   AppState.categoryMarkers.forEach(m => m.setMap(null));
   AppState.categoryMarkers = [];
 
@@ -461,18 +839,15 @@ function renderCategoryMarkersOnMap() {
 
   if (cat === "restaurant" && AppState.cachedPlaces) {
     AppState.cachedPlaces.forEach(p => {
-      if (p.distance_meters) {
-        // 좌표가 없는 경우 약간의 오프셋으로 매핑 또는 로컬 지오코딩
-        const marker = new kakao.maps.Marker({
-          position: new kakao.maps.LatLng(AppState.location.lat + (Math.random() - 0.5) * 0.008, AppState.location.lon + (Math.random() - 0.5) * 0.008),
-          map: AppState.kakaoCategoryMap
-        });
-        AppState.categoryMarkers.push(marker);
+      const marker = new kakao.maps.Marker({
+        position: new kakao.maps.LatLng(AppState.location.lat + (Math.random() - 0.5) * 0.008, AppState.location.lon + (Math.random() - 0.5) * 0.008),
+        map: AppState.kakaoCategoryMap
+      });
+      AppState.categoryMarkers.push(marker);
 
-        kakao.maps.event.addListener(marker, "click", () => {
-          quickAddFavoritePlace("식당", p.name, p.address, p.phone, p.status_badge);
-        });
-      }
+      kakao.maps.event.addListener(marker, "click", () => {
+        quickAddFavoritePlace("식당", p.name, p.address, p.phone, p.status_badge);
+      });
     });
   } else if (cat === "hospital" && AppState.cachedHospitals) {
     AppState.cachedHospitals.forEach(h => {
@@ -776,10 +1151,84 @@ function closeSafetyModal(e) {
   document.getElementById("modalSafetyMap").className = "modal-overlay";
 }
 
-function initSafetyKakaoMap(children) {
-  if (typeof kakao === "undefined" || !kakao.maps) return;
-
+async function initSafetyKakaoMap(children) {
   const container = document.getElementById("kakaoSafetyMap");
+  if (!container) return;
+
+  const kakaoReady = await loadKakaoSdk();
+  updateMapEngineBadge("safetyMapEngineBadge");
+
+  if (kakaoReady && typeof kakao !== "undefined" && kakao.maps && kakao.maps.Map) {
+    initKakaoSafetyMap(container, children);
+  } else {
+    initLeafletSafetyMap(container, children);
+  }
+}
+
+function initLeafletSafetyMap(container, children) {
+  if (AppState.leafletSafetyMap) {
+    try { AppState.leafletSafetyMap.remove(); } catch (e) {}
+    AppState.leafletSafetyMap = null;
+  }
+  container.innerHTML = "";
+
+  const map = L.map(container).setView([AppState.location.lat, AppState.location.lon], 15);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap'
+  }).addTo(map);
+
+  AppState.leafletSafetyMap = map;
+
+  // 우리 집 마커
+  const homeIcon = L.divIcon({
+    className: 'custom-home-pin',
+    html: '<div style="background:#0f172a;color:white;padding:4px 8px;border-radius:10px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:1px solid #ffffff;">🏡 우리 집</div>',
+    iconSize: [60, 24],
+    iconAnchor: [30, 12]
+  });
+  L.marker([AppState.location.lat, AppState.location.lon], { icon: homeIcon })
+    .addTo(map)
+    .bindPopup('<b>🏡 우리 집</b><br>평내유진마젤란 안심 거점');
+
+  // 안심존 원형 반경 (250m)
+  L.circle([AppState.location.lat, AppState.location.lon], {
+    radius: 250,
+    color: '#10b981',
+    fillColor: '#10b981',
+    fillOpacity: 0.15
+  }).addTo(map).bindPopup('🛡️ 유진마젤란 안심 구역 (반경 250m)');
+
+  // 아이들 마커
+  children.forEach(c => {
+    const isFirstChild = (c.username === "도비사랑녀");
+    const bgColor = isFirstChild ? "#f59e0b" : "#10b981";
+    const childIcon = L.divIcon({
+      className: 'child-safety-pin',
+      html: `<div style="background:${bgColor};color:white;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,0.3);border:2px solid #ffffff;">${c.avatar} ${c.name} (🔋${c.battery_level}%)</div>`,
+      iconSize: [120, 28],
+      iconAnchor: [60, 14]
+    });
+
+    L.marker([c.latitude, c.longitude], { icon: childIcon })
+      .addTo(map)
+      .bindPopup(`
+        <div style="font-size:12px;line-height:1.5;">
+          <b>${c.avatar} ${c.role_title} (${c.name})</b><br>
+          <span style="display:inline-block;padding:2px 6px;background:#10b981;color:white;border-radius:6px;font-size:10px;font-weight:800;margin:3px 0;">${c.status_badge}</span><br>
+          📍 <b>위치:</b> ${c.landmark || c.address}<br>
+          🔋 <b>배터리:</b> ${c.battery_level}% | ${c.is_moving ? '🏃 이동 중' : '🛑 정지'}<br>
+          ⏱️ <b>갱신:</b> ${c.updated_at}
+        </div>
+      `);
+  });
+
+  setTimeout(() => {
+    map.invalidateSize();
+  }, 200);
+}
+
+function initKakaoSafetyMap(container, children) {
   const options = {
     center: new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon),
     level: 4

@@ -7,6 +7,7 @@ KST = zoneinfo.ZoneInfo(TIMEZONE)
 
 async def add_favorite_place(user_username: str, category: str, name: str, address: str = "", lat: float = None, lon: float = None, phone: str = "", status_info: str = "", memo: str = ""):
     """즐겨찾기 토글: 이미 있으면 삭제(해제), 없으면 추가"""
+    user_username = (user_username or "가족공용").strip()
     conn = get_db_connection()
     cursor = conn.cursor()
     now_kst = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
@@ -41,10 +42,18 @@ async def toggle_favorite_place(user_username: str, category: str, name: str, ad
 async def get_favorite_places(user_username: str = None):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-    SELECT * FROM favorite_places
-    ORDER BY id DESC
-    """)
+    clean_user = (user_username or "").strip()
+    if clean_user:
+        cursor.execute("""
+        SELECT * FROM favorite_places
+        WHERE user_username = '가족공용' OR user_username = ? OR user_username IS NULL OR user_username = ''
+        ORDER BY id DESC
+        """, (clean_user,))
+    else:
+        cursor.execute("""
+        SELECT * FROM favorite_places
+        ORDER BY id DESC
+        """)
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]

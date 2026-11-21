@@ -10,8 +10,8 @@
   "8": "family-care",
   "9": "manifest.json",
   "10": "submitFamilyLogin",
-  "11": "3) 조치 및 해결 내역 (Remediation)",
-  "12": "quickAddFavoritePlace",
+  "11": "📅 프로젝트 기본 정보",
+  "12": "15. 사용자 버그레포트 6종 정밀 해결 및 핀/검색/즐겨찾기 고도화 (v1.3.7)",
   "13": "refreshData",
   "14": "showToastNotice",
   "15": "loadChatMessages",
@@ -19,6 +19,6 @@
   "17": "openSafetyModal",
   "18": "initSafetyKakaoMap",
   "19": "🌿 우리가족챙기기 (Family Care)",
-  "20": "initClock",
+  "20": "saveBusAlarmSetting",
   "21": "sw.js"
 }

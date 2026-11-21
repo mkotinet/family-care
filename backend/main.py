@@ -300,8 +300,8 @@ async def api_weather(lat: float = Query(None), lon: float = Query(None)):
 
 # --- 6. 교통 & 버스 정류소 지도 검색 ---
 @app.get("/api/transit")
-async def api_transit():
-    data = await get_transit_routes()
+async def api_transit(username: str = Query(None)):
+    data = await get_transit_routes(username)
     return data
 
 @app.get("/api/transit/nearby-stops")

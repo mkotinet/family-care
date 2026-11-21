@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 import zoneinfo
 from backend.config import DATA_GO_KR_API_KEY, KAKAO_REST_API_KEY, TIMEZONE
-from backend.database import get_db_connection, get_cached_data, set_cached_data
+from backend.database import get_db_connection, get_cached_data, set_cached_data, delete_cached_data
 from backend.mock_data import get_simulated_transit
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
@@ -215,18 +215,26 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
     set_cached_data(cache_key, stops_list, ttl_seconds=3600)
     return stops_list
 
-async def get_transit_routes():
-    cache_key = "transit_routes_real_v4"
+async def get_transit_routes(username: str = None):
+    clean_user = (username or "").strip()
+    cache_key = f"transit_routes_{clean_user or 'all'}"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("""
-    SELECT * FROM favorite_routes
-    ORDER BY sort_order ASC, id ASC
-    """)
+    if clean_user:
+        cursor.execute("""
+        SELECT * FROM favorite_routes
+        WHERE user_username = '가족공용' OR user_username = ? OR user_username IS NULL OR user_username = ''
+        ORDER BY sort_order ASC, id ASC
+        """, (clean_user,))
+    else:
+        cursor.execute("""
+        SELECT * FROM favorite_routes
+        ORDER BY sort_order ASC, id ASC
+        """)
     rows = cursor.fetchall()
     conn.close()
 
@@ -548,7 +556,7 @@ async def get_station_arrivals(station_name: str, station_id: str = None, direct
         "arrivals": arrivals
     }
 
-async def add_favorite_route(title: str, transit_type: str, station_name: str, route_no: str, target_destination: str, dest_station_name: str = "", user_username: str = "미니미니"):
+async def add_favorite_route(title: str, transit_type: str, station_name: str, route_no: str, target_destination: str, dest_station_name: str = "", user_username: str = "가족공용"):
     conn = get_db_connection()
     cursor = conn.cursor()
     now_kst = datetime.now(KST).isoformat()
@@ -558,6 +566,7 @@ async def add_favorite_route(title: str, transit_type: str, station_name: str, r
     """, (user_username, title, transit_type, station_name, route_no, target_destination, dest_station_name or target_destination, now_kst))
     conn.commit()
     conn.close()
+    delete_cached_data("transit_routes_")
     return True
 
 async def delete_favorite_route(route_id: int):
@@ -566,6 +575,7 @@ async def delete_favorite_route(route_id: int):
     cursor.execute("DELETE FROM favorite_routes WHERE id = ?", (route_id,))
     conn.commit()
     conn.close()
+    delete_cached_data("transit_routes_")
     return True
 
 async def update_favorite_route(route_id: int, title: str = None, route_no: str = None, target_destination: str = None, dest_station_name: str = None):
@@ -585,14 +595,11 @@ async def update_favorite_route(route_id: int, title: str = None, route_no: str 
     if dest_station_name is not None:
         updates.append("dest_station_name = ?")
         params.append(dest_station_name)
-
-    if not updates:
-        conn.close()
-        return True
-
-    params.append(route_id)
-    sql = f"UPDATE favorite_routes SET {', '.join(updates)} WHERE id = ?"
-    cursor.execute(sql, tuple(params))
-    conn.commit()
+    if updates:
+        params.append(route_id)
+        sql = f"UPDATE favorite_routes SET {', '.join(updates)} WHERE id = ?"
+        cursor.execute(sql, tuple(params))
+        conn.commit()
     conn.close()
+    delete_cached_data("transit_routes_")
     return True

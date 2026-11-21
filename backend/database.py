@@ -173,6 +173,7 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS favorite_restaurants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_username TEXT,
         name TEXT NOT NULL,
         category TEXT,
         phone TEXT,
@@ -185,6 +186,10 @@ def init_db():
         created_at TEXT NOT NULL
     )
     """)
+    try:
+        cursor.execute("ALTER TABLE favorite_restaurants ADD COLUMN user_username TEXT")
+    except Exception:
+        pass
 
     # 8. API 스마트 캐시
     cursor.execute("""
@@ -271,5 +276,12 @@ def set_cached_data(cache_key: str, data: dict, ttl_seconds: int = 300):
     WHERE username IN ('도비사랑녀', '미니미니채') AND (is_manual IS NULL OR is_manual = 0)
     """)
 
+    conn.commit()
+    conn.close()
+
+def delete_cached_data(cache_key_prefix: str):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM api_cache WHERE cache_key LIKE ?", (f"{cache_key_prefix}%",))
     conn.commit()
     conn.close()

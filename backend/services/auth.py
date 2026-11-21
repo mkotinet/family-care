@@ -1,5 +1,8 @@
 import hashlib
+import json
 import secrets
+import urllib.parse
+import urllib.request
 from datetime import datetime
 import zoneinfo
 from backend.config import TIMEZONE
@@ -16,8 +19,34 @@ def generate_token() -> str:
 
 ALLOWED_FAMILY_USERNAMES = ["미니미니", "Ljh", "도비사랑녀", "미니미니채"]
 
+def verify_with_haru_quiz(username: str, password: str) -> bool:
+    """하루퀴즈(haru.danminlove.com) 공식 계정 로그인 실시간 연동 검증"""
+    try:
+        url = "https://haru.danminlove.com/api/auth/login"
+        payload = json.dumps({"username": username, "password": password}).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "FamilyCare-App/1.4.3"}
+        )
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("success"):
+                return True
+    except Exception:
+        pass
+    return False
+
 async def authenticate_user(username: str, password: str = "", device_info: str = "Mobile Web"):
-    username = username.strip()
+    username = (username or "").strip()
+    password = (password or "").strip()
+
+    if not username:
+        return {"success": False, "message": "아이디를 선택해주세요."}
+
+    if not password:
+        return {"success": False, "message": "비밀번호를 입력해주세요."}
+
     if username not in ALLOWED_FAMILY_USERNAMES:
         return {"success": False, "message": "우리가족 등록 회원이 아닙니다."}
 
@@ -30,14 +59,23 @@ async def authenticate_user(username: str, password: str = "", device_info: str 
         conn.close()
         return {"success": False, "message": "사용자를 찾을 수 없습니다."}
 
-    # 비밀번호 검증 (미니미니는 하루퀴즈 해시 또는 간편비번, 다른 가족은 설정된 비번 또는 간편입장)
+    # 1. 하루퀴즈 실시간 연동 검증
+    haru_ok = verify_with_haru_quiz(username, password)
+
     stored_hash = user["password_hash"]
-    if stored_hash and password:
-        input_hash = hash_password(password)
-        # 비밀번호가 일치하거나 간편 가족 패스워드일 때 통과
-        if input_hash != stored_hash and password not in ["1234", "haru1234"]:
-            conn.close()
-            return {"success": False, "message": "비밀번호가 일치하지 않습니다."}
+    input_hash = hash_password(password)
+
+    # 하루퀴즈 인증 통과 또는 로컬 해시 일치 또는 가족 간편비번(3635, haru1234) 검증
+    is_valid = haru_ok or (stored_hash and input_hash == stored_hash) or (password in ["3635", "1234", "haru1234"])
+
+    if not is_valid:
+        conn.close()
+        return {"success": False, "message": "비밀번호가 일치하지 않습니다. 하루퀴즈 비밀번호를 확인해주세요."}
+
+    # 로컬 해시 최신 동기화
+    if not stored_hash or stored_hash != input_hash:
+        cursor.execute("UPDATE users SET password_hash = ? WHERE username = ?", (input_hash, username))
+        conn.commit()
 
     # 토큰 발급 및 저장
     token = generate_token()

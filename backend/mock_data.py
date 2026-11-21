@@ -165,18 +165,47 @@ def get_simulated_hospitals():
         "is_weekend": is_weekend,
         "items": [
             {
+                "id": "h_p_01",
+                "name": "평내약국",
+                "type": "약국",
+                "phone": "031-594-3002",
+                "address": "경기도 남양주시 평내로29번길 49, 108호 (엠투프라자)",
+                "distance": "우리 집에서 430m (도보 6분)",
+                "status": "영업중",
+                "today_hours": "09:00 ~ 22:00 (주말 정상영업)",
+                "weekend_info": "토 09:00~22:00 / 일 10:00~21:00",
+                "is_holiday_duty": True,
+                "is_open_now": True,
+                "badge": "일요·심야약국",
+                "badge_color": "#10b981",
+                "status_badge": "🟢 영업중 (22:00 마감)",
+                "lat": 37.643750,
+                "lon": 127.234100,
+                "latitude": 37.643750,
+                "longitude": 127.234100
+            },
+            {
+                "id": "h_p_02",
                 "name": "평내 유진온누리약국",
                 "type": "약국",
                 "phone": "031-592-7582",
-                "address": "남양주시 평내로 145 상가 1층",
+                "address": "남양주시 평내로 89 상가 1층",
                 "distance": "도보 2분 (120m)",
                 "status": "영업중",
                 "today_hours": "08:30 ~ 21:00 (토/일 주말 정상운영)",
+                "weekend_info": "토 08:30~21:00 / 일 09:00~19:00",
                 "is_holiday_duty": True,
                 "is_open_now": True,
-                "badge": "당번약국"
+                "badge": "당번약국",
+                "badge_color": "#10b981",
+                "status_badge": "🟢 영업중 (21:00 마감)",
+                "lat": 37.642550,
+                "lon": 127.235100,
+                "latitude": 37.642550,
+                "longitude": 127.235100
             },
             {
+                "id": "h_p_03",
                 "name": "호평 아산소아청소년과의원",
                 "type": "소아과/내과",
                 "phone": "031-591-8275",
@@ -184,11 +213,19 @@ def get_simulated_hospitals():
                 "distance": "차량 4분 (950m)",
                 "status": "진료중",
                 "today_hours": "09:00 ~ 20:00 (주말 16:00까지)",
+                "weekend_info": "토 09:00~16:00 / 일 09:00~13:00",
                 "is_holiday_duty": True,
                 "is_open_now": True,
-                "badge": "달빛어린이병원"
+                "badge": "달빛어린이병원",
+                "badge_color": "#06b6d4",
+                "status_badge": "🟢 진료중 (20:00 마감)",
+                "lat": 37.654200,
+                "lon": 127.243500,
+                "latitude": 37.654200,
+                "longitude": 127.243500
             },
             {
+                "id": "h_p_04",
                 "name": "남양주백병원 응급실",
                 "type": "종합병원 응급의료",
                 "phone": "031-590-3000",
@@ -196,11 +233,19 @@ def get_simulated_hospitals():
                 "distance": "차량 15분",
                 "status": "24시간 운영",
                 "today_hours": "365일 24시간 응급진료",
+                "weekend_info": "365일 24시간 연중무휴",
                 "is_holiday_duty": True,
                 "is_open_now": True,
-                "badge": "응급의료센터"
+                "badge": "응급의료센터",
+                "badge_color": "#ef4444",
+                "status_badge": "🟢 24시간 진료",
+                "lat": 37.712500,
+                "lon": 127.189500,
+                "latitude": 37.712500,
+                "longitude": 127.189500
             },
             {
+                "id": "h_p_05",
                 "name": "평내 바른정형외과의원",
                 "type": "정형외과/통증의학과",
                 "phone": "031-595-3375",
@@ -208,9 +253,16 @@ def get_simulated_hospitals():
                 "distance": "도보 8분 (600m)",
                 "status": "진료중",
                 "today_hours": "09:00 ~ 18:30 (토 13:30까지, 일 휴진)",
+                "weekend_info": "토 09:00~13:30 / 일 휴진",
                 "is_holiday_duty": False,
                 "is_open_now": not is_weekend or weekday == 5,
-                "badge": "일반의원"
+                "badge": "일반의원",
+                "badge_color": "#64748b",
+                "status_badge": "🟢 진료중" if (not is_weekend or weekday == 5) else "⚪ 오늘 휴진",
+                "lat": 37.644100,
+                "lon": 127.231500,
+                "latitude": 37.644100,
+                "longitude": 127.231500
             }
         ]
     }

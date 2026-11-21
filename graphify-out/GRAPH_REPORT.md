@@ -1,17 +1,17 @@
 # Graph Report - family-care  (2026-11-22)
 
 ## Corpus Check
-- 24 files · ~46,427 words
+- 24 files · ~48,928 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 4 file(s) not represented in the graph (top: (none) 2, .example 1, .css 1)
 
 ## Summary
-- 444 nodes · 1053 edges · 22 communities (20 shown, 2 thin omitted)
-- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 139 edges (avg confidence: 0.95)
+- 456 nodes · 1101 edges · 22 communities (21 shown, 1 thin omitted)
+- Extraction: 86% EXTRACTED · 14% INFERRED · 0% AMBIGUOUS · INFERRED: 155 edges (avg confidence: 0.95)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `8edd9431`
+- Built from commit: `2594c758`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -27,8 +27,8 @@
 - family-care
 - manifest.json
 - submitFamilyLogin
-- 3) 조치 및 해결 내역 (Remediation)
-- quickAddFavoritePlace
+- 📅 프로젝트 기본 정보
+- 15. 사용자 버그레포트 6종 정밀 해결 및 핀/검색/즐겨찾기 고도화 (v1.3.7)
 - refreshData
 - showToastNotice
 - loadChatMessages
@@ -36,15 +36,15 @@
 - openSafetyModal
 - initSafetyKakaoMap
 - 🌿 우리가족챙기기 (Family Care)
-- initClock
+- saveBusAlarmSetting
 
 ## God Nodes (most connected - your core abstractions)
-1. `get_db_connection()` - 32 edges
-2. `📅 프로젝트 기본 정보` - 24 edges
-3. `showToast()` - 23 edges
-4. `🌿 [기술레포트] 우리가족챙기기 (Family Care) 시스템 아키텍처 및 구현 검증 보고서` - 21 edges
-5. `loadFavorites()` - 17 edges
-6. `focusSinglePlaceOnMap()` - 17 edges
+1. `get_db_connection()` - 33 edges
+2. `showToast()` - 25 edges
+3. `📅 프로젝트 기본 정보` - 25 edges
+4. `🌿 [기술레포트] 우리가족챙기기 (Family Care) 시스템 아키텍처 및 구현 검증 보고서` - 22 edges
+5. `loadFavorites()` - 19 edges
+6. `focusSinglePlaceOnMap()` - 19 edges
 7. `get_cached_data()` - 16 edges
 8. `set_cached_data()` - 16 edges
 9. `openCategoryDetail()` - 16 edges
@@ -55,21 +55,21 @@
   기술레포트.md → frontend/static/app.js
 - `1) 목록 선택 시 단일 핀 강조 포커스 & 우리 집(내 위치) 마커 연동` --references--> `clearCategoryMarkers()`  [INFERRED]
   기술레포트.md → frontend/static/app.js
-- `📅 프로젝트 기본 정보` --references--> `update_favorite_place()`  [INFERRED]
+- `사례 13: 약국·병원 즐겨찾기 단일 장소 고착 및 버스 삭제 캐시 잔존 결함, 하루퀴즈 비밀번호 실시간 연동 로그인 고도화` --references--> `delete_cached_data()`  [INFERRED]
+  트러블슈팅.md → backend/database.py
+- `사례 13: 약국·병원 즐겨찾기 단일 장소 고착 및 버스 삭제 캐시 잔존 결함, 하루퀴즈 비밀번호 실시간 연동 로그인 고도화` --references--> `authenticate_user()`  [INFERRED]
+  트러블슈팅.md → backend/services/auth.py
+- `📅 프로젝트 기본 정보` --references--> `add_favorite_place()`  [INFERRED]
   제작히스토리.md → backend/services/places.py
-- `사례 5: 인라인 JSON 이스케이프 구문 오류 및 식당 CRUD 부재 결함` --references--> `delete_favorite_restaurant()`  [INFERRED]
-  트러블슈팅.md → backend/services/restaurant.py
-- `사례 5: 인라인 JSON 이스케이프 구문 오류 및 식당 CRUD 부재 결함` --references--> `update_favorite_restaurant()`  [INFERRED]
-  트러블슈팅.md → backend/services/restaurant.py
 
 ## Import Cycles
 - None detected.
 
-## Communities (22 total, 2 thin omitted)
+## Communities (22 total, 1 thin omitted)
 
 ### Community 0 - "main.py"
 Cohesion: 0.06
-Nodes (67): get_cached_data(), get_db_connection(), init_db(), set_cached_data(), api_auth_family(), api_auth_me(), api_chat_messages(), api_chat_rooms() (+59 more)
+Nodes (65): get_cached_data(), get_db_connection(), init_db(), set_cached_data(), api_auth_family(), api_auth_me(), api_chat_messages(), api_chat_rooms() (+57 more)
 
 ### Community 1 - "🌿 [기술레포트] 우리가족챙기기 (Family Care) 시스템 아키텍처 및 구현 검증 보고서"
 Cohesion: 0.05
@@ -77,27 +77,27 @@ Nodes (39): openRouteModal(), selectStartStation(), 10. v1.3.2 고도화 & 카�
 
 ### Community 2 - "focusSinglePlaceOnMap"
 Cohesion: 0.12
-Nodes (38): clearCategoryMarkers(), clearCategoryRouteLine(), closeSelectedPlaceCard(), drawRouteFromHome(), filterHospitalList(), focusFavoritePlaceById(), focusFavoriteRestaurantById(), focusFavoriteTransitRouteById() (+30 more)
+Nodes (37): clearCategoryMarkers(), clearCategoryRouteLine(), closeSelectedPlaceCard(), drawRouteFromHome(), filterHospitalList(), focusFavoritePlaceById(), focusFavoriteRestaurantById(), focusFavoriteTransitRouteById() (+29 more)
 
 ### Community 3 - "setTransitOrigin"
-Cohesion: 0.13
-Nodes (32): api_transit_station_arrivals(), get_station_arrivals(), calcDistanceKm(), clearTransitRouteLine(), dropCustomTransitPin(), findNearestBusStop(), formatFriendlyPlaceName(), getDistanceFromHome() (+24 more)
+Cohesion: 0.14
+Nodes (34): calcDistanceKm(), clearTransitRouteLine(), dropCustomTransitPin(), findNearestBusStop(), formatFriendlyPlaceName(), getDistanceFromHome(), handleCategoryMapClick(), initCategoryKakaoMap() (+26 more)
 
 ### Community 4 - "showToast"
-Cohesion: 0.10
-Nodes (29): checkBusArrivalAlerts(), closeBusAlarmModal(), closeEditFavoriteModal(), deleteFavoritePlace(), deleteFavoriteRestaurant(), deleteTransitRoute(), executeHospitalSearch(), initBusAlertSystem() (+21 more)
+Cohesion: 0.26
+Nodes (13): closeEditFavoriteModal(), deleteFavoritePlace(), deleteFavoriteRestaurant(), deleteTransitRoute(), loadFavorites(), removeBusAlarm(), saveFavoriteEdit(), showToast() (+5 more)
 
 ### Community 5 - "📅 프로젝트 기본 정보"
-Cohesion: 0.08
-Nodes (26): add_favorite_place(), toggle_favorite_place(), autoDetectUserLocation(), buildRestaurantListHtml(), executeRestSearch(), quickRestSearch(), renderRestaurantDetail(), switchStationDirection() (+18 more)
+Cohesion: 0.09
+Nodes (26): add_favorite_place(), toggle_favorite_place(), checkAppVersionUpdate(), isServerVersionNewer(), openEditPlaceModal(), openEditPlaceModalById(), openEditTransitModal(), openEditTransitModalById() (+18 more)
 
 ### Community 6 - "update_user_location"
-Cohesion: 0.11
-Nodes (12): calculate_distance_km(), haversine_distance(), wgs84_to_kma_grid(), api_auth_heartbeat(), api_auth_login(), api_location_manual_set(), api_location_request_ping(), api_location_test_simulate() (+4 more)
+Cohesion: 0.12
+Nodes (11): calculate_distance_km(), haversine_distance(), wgs84_to_kma_grid(), api_auth_heartbeat(), api_auth_login(), api_location_manual_set(), api_location_test_simulate(), api_location_update() (+3 more)
 
 ### Community 7 - "app.js"
-Cohesion: 0.11
-Nodes (12): AppState, checkPwaDisplayMode(), checkWhatsNewPopup(), closeRouteModal(), dismissPwaBanner(), openEditRestaurantModal(), openEditRestaurantModalById(), openPwaGuideModal() (+4 more)
+Cohesion: 0.08
+Nodes (20): AppState, buildRestaurantListHtml(), checkPwaDisplayMode(), checkWhatsNewPopup(), closeRouteModal(), dismissPwaBanner(), focusHospitalOnMap(), focusRestaurantOnMap() (+12 more)
 
 ### Community 8 - "family-care"
 Cohesion: 0.10
@@ -108,24 +108,24 @@ Cohesion: 0.14
 Nodes (13): background_color, categories, description, display, display_override, icons, id, name (+5 more)
 
 ### Community 10 - "submitFamilyLogin"
-Cohesion: 0.18
-Nodes (11): checkAppVersionUpdate(), closeLoginModal(), isServerVersionNewer(), loadStoredSession(), sendUserHeartbeat(), setupMobileLifecycle(), startChildLocationTracker(), submitFamilyLogin() (+3 more)
+Cohesion: 0.29
+Nodes (9): closeLoginModal(), logoutFamily(), refreshData(), refreshMyLocation(), sendUserHeartbeat(), setupMobileLifecycle(), startChildLocationTracker(), submitFamilyLogin() (+1 more)
 
-### Community 11 - "3) 조치 및 해결 내역 (Remediation)"
-Cohesion: 0.27
-Nodes (10): openEditPlaceModal(), openEditPlaceModalById(), openEditTransitModal(), openEditTransitModalById(), openLoginModal(), 14. 화면 터치 및 메뉴 동작 무반응 긴급 결함 RCA 및 핫픽스 (v1.3.6), 1) 결함 현상 (Symptom), 2) 근본 원인 분석 (RCA - Root Cause Analysis) (+2 more)
+### Community 11 - "📅 프로젝트 기본 정보"
+Cohesion: 0.08
+Nodes (31): delete_cached_data(), api_places_favorite_update(), api_transit_station_arrivals(), api_transit_update(), update_favorite_place(), delete_favorite_route(), get_station_arrivals(), update_favorite_route() (+23 more)
 
-### Community 12 - "quickAddFavoritePlace"
-Cohesion: 0.22
-Nodes (9): quickAddFavoriteFestivalById(), quickAddFavoriteHospitalById(), quickAddFavoriteHospitalByName(), quickAddFavoritePlace(), quickAddFavoriteRestaurantById(), quickAddFavoriteRestaurantByName(), toggleFavoritePlace(), toggleSelectedPlaceFavorite() (+1 more)
+### Community 12 - "15. 사용자 버그레포트 6종 정밀 해결 및 핀/검색/즐겨찾기 고도화 (v1.3.7)"
+Cohesion: 0.25
+Nodes (8): renderCultureDetail(), switchCultureScope(), 15. 사용자 버그레포트 6종 정밀 해결 및 핀/검색/즐겨찾기 고도화 (v1.3.7), 4) 버그 4: 전국 축제보기 메뉴 버튼이 실행되지 않는 문제, 5) 버그 5: 메인 즐겨찾기 목록에서 식당의 수정(✏️) 및 삭제(🗑️) 미표시 문제, 사례 4: 바텀 시트 컨테이너 DOM ID 불일치로 인한 탭 전환 먹통 결함 (TypeError: null.innerHTML), 🛠️ [트러블슈팅 및 오류검증 기술노트] 우리가족챙기기 (Family Care), 📋 핵심 체크리스트 (Gotcha Summary for Developers)
 
 ### Community 13 - "refreshData"
-Cohesion: 0.29
-Nodes (8): checkChildSafetySummary(), initApp(), loadWeather(), refreshData(), refreshMyLocation(), renderFamilyLoginGrid(), renderWeatherTimelines(), selectLoginAccount()
+Cohesion: 0.20
+Nodes (10): checkChildSafetySummary(), closeManualLocationModal(), initApp(), loadWeather(), openLoginModal(), renderFamilyLoginGrid(), renderWeatherTimelines(), selectLoginAccount() (+2 more)
 
 ### Community 14 - "showToastNotice"
-Cohesion: 0.25
-Nodes (8): closeKakaoKeyModal(), closeManualLocationModal(), closeWhatsNewModal(), dismissWhatsNewForever(), saveKakaoJsKey(), sendChildLocationPing(), showToastNotice(), submitManualLocation()
+Cohesion: 0.33
+Nodes (6): closeKakaoKeyModal(), closeWhatsNewModal(), dismissWhatsNewForever(), saveKakaoJsKey(), sendChildLocationPing(), showToastNotice()
 
 ### Community 15 - "loadChatMessages"
 Cohesion: 0.25
@@ -147,23 +147,27 @@ Nodes (7): getKakaoJsKey(), initKakaoSafetyMap(), initLeafletSafetyMap(), initSa
 Cohesion: 0.33
 Nodes (5): 🐳 Docker & Synology Portainer 배포, 🎨 UX/UI 디자인 컨셉, 🚀 빠른 시작 (Local Test), 🌿 우리가족챙기기 (Family Care), 🌟 주요 핵심 기능 (6대 위젯)
 
+### Community 20 - "saveBusAlarmSetting"
+Cohesion: 0.50
+Nodes (4): closeBusAlarmModal(), playBusAlertChime(), saveBusAlarmSetting(), triggerBusArrivalNotification()
+
 ## Knowledge Gaps
-- **2 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **1 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `📅 프로젝트 기본 정보` connect `📅 프로젝트 기본 정보` to `main.py`, `focusSinglePlaceOnMap`, `setTransitOrigin`, `showToast`?**
-  _High betweenness centrality (0.217) - this node is a cross-community bridge._
-- **Are the 23 inferred relationships involving `📅 프로젝트 기본 정보` (e.g. with `add_favorite_place()` and `toggle_favorite_place()`) actually correct?**
-  _`📅 프로젝트 기본 정보` has 23 INFERRED edges - model-reasoned connections that need verification._
-- **Should `main.py` be split into smaller, more focused modules?**
-  _Cohesion score 0.05901696088611977 - nodes in this community are weakly interconnected._
-- **Why does `🌿 [기술레포트] 우리가족챙기기 (Family Care) 시스템 아키텍처 및 구현 검증 보고서` connect `🌿 [기술레포트] 우리가족챙기기 (Family Care) 시스템 아키텍처 및 구현 검증 보고서` to `setTransitOrigin`, `3) 조치 및 해결 내역 (Remediation)`, `showToast`, `📅 프로젝트 기본 정보`?**
-  _High betweenness centrality (0.135) - this node is a cross-community bridge._
+- **Why does `📅 프로젝트 기본 정보` connect `📅 프로젝트 기본 정보` to `main.py`, `focusSinglePlaceOnMap`, `setTransitOrigin`, `showToast`, `📅 프로젝트 기본 정보`, `15. 사용자 버그레포트 6종 정밀 해결 및 핀/검색/즐겨찾기 고도화 (v1.3.7)`?**
+  _High betweenness centrality (0.192) - this node is a cross-community bridge._
 - **Are the 5 inferred relationships involving `showToast()` (e.g. with `3) 버그 3: 식당 및 약국 검색이 안 되는 문제 ("검색 통신 중 오류가 발생했습니다")` and `6) 버그 6: 즐겨찾기 삭제 중 "삭제 중 오류가 발생했습니다" 팝업 결함`) actually correct?**
   _`showToast()` has 5 INFERRED edges - model-reasoned connections that need verification._
+- **Should `main.py` be split into smaller, more focused modules?**
+  _Cohesion score 0.058896138247222715 - nodes in this community are weakly interconnected._
+- **Why does `🌿 [기술레포트] 우리가족챙기기 (Family Care) 시스템 아키텍처 및 구현 검증 보고서` connect `🌿 [기술레포트] 우리가족챙기기 (Family Care) 시스템 아키텍처 및 구현 검증 보고서` to `focusSinglePlaceOnMap`, `setTransitOrigin`, `📅 프로젝트 기본 정보`, `📅 프로젝트 기본 정보`, `15. 사용자 버그레포트 6종 정밀 해결 및 핀/검색/즐겨찾기 고도화 (v1.3.7)`?**
+  _High betweenness centrality (0.134) - this node is a cross-community bridge._
+- **Are the 24 inferred relationships involving `📅 프로젝트 기본 정보` (e.g. with `delete_cached_data()` and `add_favorite_place()`) actually correct?**
+  _`📅 프로젝트 기본 정보` has 24 INFERRED edges - model-reasoned connections that need verification._
 - **Should `🌿 [기술레포트] 우리가족챙기기 (Family Care) 시스템 아키텍처 및 구현 검증 보고서` be split into smaller, more focused modules?**
   _Cohesion score 0.05 - nodes in this community are weakly interconnected._
-- **Why does `search_nearby_bus_stops()` connect `main.py` to `setTransitOrigin`, `📅 프로젝트 기본 정보`?**
-  _High betweenness centrality (0.078) - this node is a cross-community bridge._
+- **Why does `search_nearby_bus_stops()` connect `main.py` to `📅 프로젝트 기본 정보`, `setTransitOrigin`?**
+  _High betweenness centrality (0.068) - this node is a cross-community bridge._

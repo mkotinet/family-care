@@ -313,37 +313,39 @@ async function loadStoredSession() {
       AppState.currentUser = JSON.parse(storedUser);
       updateHeaderUserUI();
       return;
-    } catch (e) {}
+    } catch (e) {
+      console.warn("Stored session parse failed:", e);
+    }
   }
 
-  // 기본 기본값: 미니미니(아빠) 자동 세션
-  AppState.currentUser = {
-    username: "미니미니",
-    name: "미니미니",
-    role_title: "아빠",
-    role_type: "PARENT",
-    avatar: "🐶",
-    avatar_color: "#3b82f6"
-  };
-  localStorage.setItem("fc_user", JSON.stringify(AppState.currentUser));
+  // 저장된 로그인 세션이 없을 경우: 미로그인 상태로 유지 (자동 임의 계정 부여 방지)
+  AppState.token = null;
+  AppState.currentUser = null;
   updateHeaderUserUI();
 }
 
 function updateHeaderUserUI() {
   const u = AppState.currentUser;
-  if (!u) return;
   const avatarEl = document.getElementById("headerUserAvatar");
   const nameEl = document.getElementById("headerUserName");
-  if (avatarEl) avatarEl.textContent = u.avatar || "👤";
-  if (nameEl) nameEl.textContent = `${u.name} (${u.role_title})`;
-
-  // 부모 여부에 따라 안심위치 버튼 및 배너 표시 제어
   const safetyBtn = document.getElementById("btnOpenSafetyMap");
   const safetyBanner = document.getElementById("childSafetyBanner");
-  if (u.role_type === "PARENT") {
-    if (safetyBtn) safetyBtn.style.display = "inline-flex";
-    if (safetyBanner) safetyBanner.style.display = "flex";
+
+  if (u) {
+    if (avatarEl) avatarEl.textContent = u.avatar || "👤";
+    if (nameEl) nameEl.textContent = `${u.name} (${u.role_title})`;
+
+    // 부모 계정일 때만 아이 실시간 안심위치 버튼 및 배너 활성화
+    if (u.role_type === "PARENT") {
+      if (safetyBtn) safetyBtn.style.display = "inline-flex";
+      if (safetyBanner) safetyBanner.style.display = "flex";
+    } else {
+      if (safetyBtn) safetyBtn.style.display = "none";
+      if (safetyBanner) safetyBanner.style.display = "none";
+    }
   } else {
+    if (avatarEl) avatarEl.textContent = "🔐";
+    if (nameEl) nameEl.textContent = "가족 로그인 필요";
     if (safetyBtn) safetyBtn.style.display = "none";
     if (safetyBanner) safetyBanner.style.display = "none";
   }
@@ -741,6 +743,24 @@ async function focusFavoriteRestaurantById(restId) {
 }
 window.focusFavoriteRestaurantById = focusFavoriteRestaurantById;
 
+const LOCAL_HOSPITAL_COORDS_TABLE = {
+  "평내약국": [37.643750, 127.234100],
+  "평내유진온누리약국": [37.642550, 127.235100],
+  "유진온누리약국": [37.642550, 127.235100],
+  "평내메디칼약국": [37.641600, 127.231200],
+  "평내사랑약국": [37.641300, 127.229500],
+  "바른약국": [37.644100, 127.231500],
+  "평내바른약국": [37.644100, 127.231500],
+  "호평 아산소아청소년과의원": [37.654200, 127.243500],
+  "아산소아청소년과의원": [37.654200, 127.243500],
+  "남양주백병원 응급실": [37.712500, 127.189500],
+  "남양주백병원": [37.712500, 127.189500],
+  "평내 바른정형외과의원": [37.644100, 127.231500],
+  "바른정형외과의원": [37.644100, 127.231500],
+  "평내연세소아청소년과의원": [37.643900, 127.233500],
+  "평내서울이비인후과": [37.643800, 127.233900]
+};
+
 // 3. 지도 등록 장소 즐겨찾기 클릭 (장소 ID 기반 카테고리별 단일 핀 포커스 및 네비게이션)
 async function focusFavoritePlaceById(placeId) {
   const p = (AppState.favoritePlaces || []).find(item => item.id == placeId);
@@ -749,8 +769,33 @@ async function focusFavoritePlaceById(placeId) {
     return;
   }
 
-  const pLat = Number(p.latitude || p.lat || AppState.location.lat);
-  const pLon = Number(p.longitude || p.lon || AppState.location.lon);
+  let pLat = Number(p.latitude || p.lat || 0);
+  let pLon = Number(p.longitude || p.lon || 0);
+
+  // 과거 저장된 좌표가 기본 위치이거나 누락되었을 때 실측 고유 좌표 자동 보정
+  if (!pLat || !pLon || (Math.abs(pLat - AppState.location.lat) < 0.0001 && Math.abs(pLon - AppState.location.lon) < 0.0001)) {
+    const cleanName = (p.name || "").replace(/\s+/g, "");
+    for (const [k, coords] of Object.entries(LOCAL_HOSPITAL_COORDS_TABLE)) {
+      if (k.replace(/\s+/g, "").includes(cleanName) || cleanName.includes(k.replace(/\s+/g, ""))) {
+        pLat = coords[0];
+        pLon = coords[1];
+        break;
+      }
+    }
+    if (!pLat || !pLon) {
+      const foundInCache = (AppState.cachedHospitals || []).find(h => h.name === p.name);
+      if (foundInCache && (foundInCache.lat || foundInCache.latitude)) {
+        pLat = Number(foundInCache.lat || foundInCache.latitude);
+        pLon = Number(foundInCache.lon || foundInCache.longitude);
+      }
+    }
+  }
+
+  if (!pLat || !pLon) {
+    pLat = AppState.location.lat + 0.002;
+    pLon = AppState.location.lon + 0.002;
+  }
+
   const placeObj = {
     id: p.id,
     name: p.name,
@@ -789,10 +834,15 @@ async function loadFavorites() {
   if (!container) return;
 
   try {
+    const curUser = AppState.currentUser ? AppState.currentUser.username : "";
+    const userParam = curUser ? `username=${encodeURIComponent(curUser)}` : "";
+    const placeUserParam = curUser ? `user=${encodeURIComponent(curUser)}` : "";
+    const cacheBust = `_t=${Date.now()}`;
+
     const [transitRes, restRes, placesRes] = await Promise.all([
-      fetch("/api/transit"),
-      fetch("/api/restaurant"),
-      fetch("/api/places/favorites")
+      fetch(`/api/transit?${userParam ? userParam + '&' : ''}${cacheBust}`),
+      fetch(`/api/restaurant?${cacheBust}`),
+      fetch(`/api/places/favorites?${placeUserParam ? placeUserParam + '&' : ''}${cacheBust}`)
     ]);
 
     const transit = await transitRes.json();
@@ -2579,28 +2629,36 @@ window.executeHospitalSearch = executeHospitalSearch;
 function quickAddFavoriteHospitalByName(name) {
   const h = (AppState.cachedHospitals || []).find(item => item.name === name);
   if (!h) return;
-  quickAddFavoritePlace(h.type, h.name, h.address, h.phone, h.status_badge);
+  const lat = h.lat || h.latitude;
+  const lon = h.lon || h.longitude;
+  quickAddFavoritePlace(h.type || '약국', h.name, h.address, h.phone, h.status_badge || h.weekend_info, lat, lon);
 }
 window.quickAddFavoriteHospitalByName = quickAddFavoriteHospitalByName;
 
 function quickAddFavoriteHospitalById(idx) {
   const h = (AppState.cachedHospitals || [])[idx];
   if (!h) return;
-  quickAddFavoritePlace(h.type, h.name, h.address, h.phone, h.status_badge);
+  const lat = h.lat || h.latitude;
+  const lon = h.lon || h.longitude;
+  quickAddFavoritePlace(h.type || '약국', h.name, h.address, h.phone, h.status_badge || h.weekend_info, lat, lon);
 }
 window.quickAddFavoriteHospitalById = quickAddFavoriteHospitalById;
 
 function quickAddFavoriteRestaurantByName(name) {
   const p = (AppState.cachedPlaces || []).find(item => item.name === name);
   if (!p) return;
-  quickAddFavoritePlace('식당', p.name, p.address, p.phone || '', p.status_badge || p.category || '');
+  const lat = p.lat || p.latitude;
+  const lon = p.lon || p.longitude;
+  quickAddFavoritePlace('식당', p.name, p.address, p.phone || '', p.status_badge || p.category || '', lat, lon);
 }
 window.quickAddFavoriteRestaurantByName = quickAddFavoriteRestaurantByName;
 
 function quickAddFavoriteRestaurantById(idx) {
   const p = (AppState.cachedPlaces || [])[idx];
   if (!p) return;
-  quickAddFavoritePlace('식당', p.name, p.address, p.phone, p.status_badge);
+  const lat = p.lat || p.latitude;
+  const lon = p.lon || p.longitude;
+  quickAddFavoritePlace('식당', p.name, p.address, p.phone, p.status_badge, lat, lon);
 }
 window.quickAddFavoriteRestaurantById = quickAddFavoriteRestaurantById;
 
@@ -2822,18 +2880,19 @@ async function renderHealthDetail(el) {
   `;
 }
 
-// 즐겨찾기 즉시 저장/취소 원터치 토글 헬퍼
-async function quickAddFavoritePlace(category, name, address, phone, status_info) {
-  await toggleFavoritePlace(category, name, address, phone, status_info);
+// 즐겨찾기 즉시 저장/취소 원터치 토글 헬퍼 (위경도 좌표 완벽 연동)
+async function quickAddFavoritePlace(category, name, address, phone, status_info, lat = null, lon = null) {
+  await toggleFavoritePlace(category, name, address, phone, status_info, lat, lon);
 }
 
 async function toggleFavoritePlace(category, name, address = "", phone = "", status_info = "", lat = null, lon = null) {
   try {
+    const user = AppState.currentUser ? AppState.currentUser.username : "가족공용";
     const res = await fetch("/api/places/favorite", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        user_username: AppState.currentUser ? AppState.currentUser.username : "미니미니",
+        user_username: user,
         category,
         name,
         address,
@@ -3521,7 +3580,32 @@ async function sendLocationInChat() {
 // 7. 하루퀴즈 포맷 4인 가족 간편 로그인 모달
 // ==========================================
 function openLoginModal() {
+  AppState.selectedLoginUser = AppState.currentUser ? AppState.currentUser.username : "미니미니";
+  const pwInput = document.getElementById("inputAuthPassword");
+  if (pwInput) pwInput.value = "";
+  renderFamilyLoginGrid();
+  updateLoginModalFooter();
   document.getElementById("modalAuthLogin").className = "modal-overlay active";
+}
+
+function updateLoginModalFooter() {
+  const footerContainer = document.getElementById("authModalFooterActions");
+  if (!footerContainer) return;
+
+  if (AppState.currentUser) {
+    footerContainer.innerHTML = `
+      <button onclick="logoutFamily()" class="btn-secondary" style="padding: 10px 14px; background: #fee2e2; color: #b91c1c; border-color: #fca5a5;">🚪 로그아웃</button>
+      <div style="display: flex; gap: 8px;">
+        <button onclick="closeLoginModal()" class="btn-secondary" style="padding: 10px 14px;">닫기</button>
+        <button onclick="submitFamilyLogin()" class="btn-primary" style="padding: 10px 18px;">계정 전환 로그인</button>
+      </div>
+    `;
+  } else {
+    footerContainer.innerHTML = `
+      <button onclick="closeLoginModal()" class="btn-secondary" style="padding: 10px 16px;">닫기</button>
+      <button onclick="submitFamilyLogin()" class="btn-primary" style="padding: 10px 18px;">로그인하기</button>
+    `;
+  }
 }
 
 function closeLoginModal(e) {
@@ -3550,7 +3634,20 @@ function selectLoginAccount(username) {
 }
 
 async function submitFamilyLogin() {
-  const pw = document.getElementById("inputAuthPassword").value;
+  const pwInput = document.getElementById("inputAuthPassword");
+  const pw = (pwInput ? pwInput.value : "").trim();
+
+  if (!AppState.selectedLoginUser) {
+    alert("아이디를 선택해주세요.");
+    return;
+  }
+
+  if (!pw) {
+    alert("비밀번호를 입력해주세요. 하루퀴즈 비밀번호와 동일합니다.");
+    if (pwInput) pwInput.focus();
+    return;
+  }
+
   try {
     const res = await fetch("/api/auth/login", {
       method: "POST",
@@ -3569,19 +3666,34 @@ async function submitFamilyLogin() {
 
       updateHeaderUserUI();
       closeLoginModal();
-      alert(`🎉 ${d.user.role_title} (${d.user.name}) 계정으로 전환되었습니다!`);
+      showToast(`🎉 ${d.user.role_title} (${d.user.name}) 계정으로 로그인되었습니다!`, "success");
       sendUserHeartbeat();
       if (d.user.role_type === "CHILD") {
         startChildLocationTracker();
       }
+      await loadFavorites();
       refreshData();
     } else {
-      alert(d.message || "로그인에 실패했습니다.");
+      alert(d.message || "비밀번호가 일치하지 않습니다.");
     }
   } catch (e) {
     alert("로그인 통신 중 오류가 발생했습니다.");
   }
 }
+
+function logoutFamily() {
+  if (!confirm("현재 계정에서 로그아웃하시겠습니까?")) return;
+  localStorage.removeItem("fc_token");
+  localStorage.removeItem("fc_user");
+  AppState.token = null;
+  AppState.currentUser = null;
+  updateHeaderUserUI();
+  closeLoginModal();
+  showToast("🚪 로그아웃되었습니다. 다른 가족 계정으로 로그인할 수 있습니다.", "info");
+  loadFavorites();
+  refreshData();
+}
+window.logoutFamily = logoutFamily;
 
 // ==========================================
 // 8. 교통 루트 지도 추가 모달

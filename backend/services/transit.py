@@ -242,3 +242,32 @@ async def delete_favorite_route(route_id: int):
     conn.commit()
     conn.close()
     return True
+
+async def update_favorite_route(route_id: int, title: str = None, route_no: str = None, target_destination: str = None, dest_station_name: str = None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    updates = []
+    params = []
+    if title is not None:
+        updates.append("title = ?")
+        params.append(title)
+    if route_no is not None:
+        updates.append("route_no = ?")
+        params.append(route_no)
+    if target_destination is not None:
+        updates.append("target_destination = ?")
+        params.append(target_destination)
+    if dest_station_name is not None:
+        updates.append("dest_station_name = ?")
+        params.append(dest_station_name)
+
+    if not updates:
+        conn.close()
+        return True
+
+    params.append(route_id)
+    sql = f"UPDATE favorite_routes SET {', '.join(updates)} WHERE id = ?"
+    cursor.execute(sql, tuple(params))
+    conn.commit()
+    conn.close()
+    return True

@@ -98,11 +98,59 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 버스 도착 알림 감시 루프 초기화 (15초 주기)
   initBusAlertSystem();
 
+  // 앱 실행 시 내 위치 자동 탐색 및 날씨/지역 자동 반영
+  autoDetectUserLocation();
+
   // 자녀 계정일 경우 자동 GPS 위치 추적 리포트 가동
   if (AppState.currentUser && AppState.currentUser.role_type === "CHILD") {
     startChildLocationTracker();
   }
 });
+
+// 앱 실행 시 브라우저 GPS로 내 현재 위치를 자동 탐색하여 날씨와 위치를 즉시 동기화
+async function autoDetectUserLocation() {
+  if (!navigator.geolocation) return;
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      AppState.location.lat = lat;
+      AppState.location.lon = lon;
+
+      // 카카오 역지오코딩 시도
+      try {
+        if (typeof kakao !== "undefined" && kakao.maps && kakao.maps.services) {
+          const geocoder = new kakao.maps.services.Geocoder();
+          geocoder.coord2RegionCode(lon, lat, (result, status) => {
+            if (status === kakao.maps.services.Status.OK && result.length > 0) {
+              const r = result[0];
+              AppState.location.address = `${r.region_1depth_name} ${r.region_2depth_name} ${r.region_3depth_name}`;
+              const locEl = document.getElementById("currentLocText");
+              if (locEl) locEl.innerText = AppState.location.address;
+            }
+          });
+        }
+      } catch (e) {}
+
+      // 실시간 날씨 데이터 즉시 재조회 및 화면 갱신
+      try {
+        const res = await fetch(`/api/weather?lat=${lat}&lon=${lon}`);
+        const wData = await res.json();
+        AppState.weatherData = wData;
+        renderWeatherSummary(wData);
+      } catch (e) {}
+
+      // 즐겨찾기 갱신
+      loadFavorites();
+      console.log(`[Auto Location] 내 위치 자동 반영 완료: (${lat}, ${lon})`);
+    },
+    (err) => {
+      console.log("[Auto Location] GPS 권한 미허용/타임아웃. 기본 거점(평내유진마젤란) 유지");
+    },
+    { enableHighAccuracy: false, timeout: 6000, maximumAge: 60000 }
+  );
+}
 
 // 시계 가동
 function initClock() {
@@ -656,13 +704,16 @@ async function loadFavorites() {
     transit.forEach(t => {
       items.push(`
         <div class="fav-card" onclick="openCategoryDetail('transit')">
-          <div class="fav-card-top">
+          <div class="fav-card-top" style="display: flex; justify-content: space-between; align-items: center;">
             <span class="fav-card-tag" style="background: #e0f2fe; color: #0369a1;">🚌 ${t.route_no}</span>
-            <span style="font-size: 10px; color: #64748b;">${t.station_name}</span>
+            <div style="display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation()">
+              <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick='openEditTransitModal(${JSON.stringify(t).replace(/'/g, "&#39;")})'>✏️</button>
+              <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="삭제" onclick="deleteTransitRoute(${t.id})">🗑️</button>
+            </div>
           </div>
           <div>
             <div class="fav-card-title">${t.title}</div>
-            <div class="fav-card-sub">${t.destination} 방면</div>
+            <div class="fav-card-sub">${t.station_name} ➔ ${t.destination || t.dest_station_name}</div>
           </div>
           <div class="fav-card-highlight" style="color: ${t.badge_color};">
             ${t.remain_time}
@@ -675,7 +726,7 @@ async function loadFavorites() {
     restaurants.forEach(r => {
       items.push(`
         <div class="fav-card" onclick="openCategoryDetail('restaurant')">
-          <div class="fav-card-top">
+          <div class="fav-card-top" style="display: flex; justify-content: space-between; align-items: center;">
             <span class="fav-card-tag" style="background: #ffedd5; color: #c2410c;">🍽️ ${r.category}</span>
             <span style="font-size: 10px; color: #64748b;">${r.distance_meters}m</span>
           </div>
@@ -694,12 +745,16 @@ async function loadFavorites() {
     places.forEach(p => {
       items.push(`
         <div class="fav-card" onclick="openCategoryDetail('${p.category === '약국' || p.category === '병원' ? 'hospital' : (p.category === '식당' ? 'restaurant' : 'culture')}')">
-          <div class="fav-card-top">
+          <div class="fav-card-top" style="display: flex; justify-content: space-between; align-items: center;">
             <span class="fav-card-tag" style="background: #f1f5f9; color: #334155;">⭐ ${p.category}</span>
+            <div style="display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation()">
+              <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick='openEditPlaceModal(${JSON.stringify(p).replace(/'/g, "&#39;")})'>✏️</button>
+              <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="삭제" onclick="deleteFavoritePlace(${p.id})">🗑️</button>
+            </div>
           </div>
           <div>
             <div class="fav-card-title">${p.name}</div>
-            <div class="fav-card-sub">${p.address || ''}</div>
+            <div class="fav-card-sub">${p.memo || p.address || ''}</div>
           </div>
           <div class="fav-card-highlight" style="font-size: 11px; color: #0284c7;">
             ${p.status_info || '즐겨찾기 저장됨'}
@@ -1426,67 +1481,145 @@ async function dropCustomTransitPin(lat, lon) {
   });
 }
 
-// 약국/병원 목록에서 선택 시 지도로 즉시 전환 & 핀 포커스 & 즐겨찾기 체크
-function focusHospitalOnMap(idx) {
-  const h = (AppState.cachedHospitals || [])[idx];
-  if (!h) return;
+// 기존 카테고리 핀 마커 및 오버레이 전체 초기화
+function clearCategoryMarkers() {
+  if (AppState.categoryMarkers) {
+    AppState.categoryMarkers.forEach(m => {
+      if (m.setMap) m.setMap(null);
+      if (m.remove) m.remove();
+    });
+  }
+  AppState.categoryMarkers = [];
+}
 
+// 전체 핀 다시 보기 복원
+function showAllCategoryMarkers() {
+  clearCategoryMarkers();
+  if (AppState.mapEngine === "kakao" && AppState.kakaoCategoryMap) {
+    renderKakaoCategoryMarkers();
+    AppState.kakaoCategoryMap.setLevel(4);
+    AppState.kakaoCategoryMap.panTo(new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon));
+  } else if (AppState.leafletCategoryMap) {
+    renderLeafletCategoryMarkers(AppState.leafletCategoryMap);
+    AppState.leafletCategoryMap.setView([AppState.location.lat, AppState.location.lon], 15);
+  }
+  updateMapHelperText();
+  showToast("📍 주변 전체 핀이 다시 표시되었습니다.", "info");
+}
+
+// 선택한 약국 또는 식당 '단 1곳만' 강조 표시하고, 우리집/내위치 핀과 경로선(Polyline)을 렌더링
+function focusSinglePlaceOnMap(place, category) {
   switchDetailView('map');
 
-  const hLat = h.latitude || (AppState.location.lat + (Math.cos(idx + 2) * 0.0045));
-  const hLon = h.longitude || (AppState.location.lon + (Math.sin(idx + 2) * 0.0045));
+  const pLat = place.lat || place.latitude || (AppState.location.lat + 0.003);
+  const pLon = place.lon || place.longitude || (AppState.location.lon + 0.003);
+  const isPharm = (category === "약국" || place.type === "약국");
+  const isRestaurant = (category === "식당");
 
+  // 1. 기존 주변 수십 개 핀들을 모두 숨김 (단일 핀 포커스를 위해)
+  clearCategoryMarkers();
+
+  // 2. 카카오맵인 경우
   if (AppState.mapEngine === "kakao" && AppState.kakaoCategoryMap) {
-    AppState.kakaoCategoryMap.setLevel(3);
-    AppState.kakaoCategoryMap.panTo(new kakao.maps.LatLng(hLat, hLon));
+    const map = AppState.kakaoCategoryMap;
+
+    // 우리 집 마커 & 오버레이 보장
+    const homePos = new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon);
+    const homeMarker = new kakao.maps.Marker({ position: homePos, map: map });
+    AppState.categoryMarkers.push(homeMarker);
+    const homeOverlay = new kakao.maps.CustomOverlay({
+      position: homePos,
+      content: '<div style="padding: 4px 8px; background: #0f172a; color: white; font-size: 11px; font-weight: 800; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); white-space:nowrap;">🏡 우리 집 (내 위치)</div>',
+      yAnchor: 2.2
+    });
+    homeOverlay.setMap(map);
+    AppState.categoryMarkers.push(homeOverlay);
+
+    // 선택한 장소 단일 마커 & 강조 커스텀 오버레이
+    const targetPos = new kakao.maps.LatLng(pLat, pLon);
+    const targetMarker = new kakao.maps.Marker({ position: targetPos, map: map });
+    AppState.categoryMarkers.push(targetMarker);
+
+    const pinBg = isPharm ? '#10b981' : (isRestaurant ? '#f97316' : '#3b82f6');
+    const pinIcon = isPharm ? '💊' : (isRestaurant ? '🍽️' : '🏥');
+    const targetOverlay = new kakao.maps.CustomOverlay({
+      position: targetPos,
+      content: `<div style="background:${pinBg};color:white;padding:4px 8px;border-radius:10px;font-size:12px;font-weight:800;box-shadow:0 3px 8px rgba(0,0,0,0.3);border:2px solid #ffffff;white-space:nowrap;">${pinIcon} ${place.name}</div>`,
+      yAnchor: 2.2
+    });
+    targetOverlay.setMap(map);
+    AppState.categoryMarkers.push(targetOverlay);
+
+    // 두 지점(우리집 ➔ 선택장소)이 한눈에 쏙 들어오도록 자동 줌 레벨 맞춤
+    const bounds = new kakao.maps.LatLngBounds();
+    bounds.extend(homePos);
+    bounds.extend(targetPos);
+    map.setBounds(bounds);
+
   } else if (AppState.leafletCategoryMap) {
-    AppState.leafletCategoryMap.setView([hLat, hLon], 16);
+    // Leaflet인 경우
+    const map = AppState.leafletCategoryMap;
+
+    const homeIcon = L.divIcon({
+      className: 'custom-home-pin',
+      html: '<div style="background:#0f172a;color:white;padding:4px 8px;border-radius:10px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:1px solid #ffffff;">🏡 우리 집 (내 위치)</div>',
+      iconSize: [60, 24],
+      iconAnchor: [30, 12]
+    });
+    const hm = L.marker([AppState.location.lat, AppState.location.lon], { icon: homeIcon }).addTo(map);
+    AppState.categoryMarkers.push(hm);
+
+    const pinBg = isPharm ? '#10b981' : (isRestaurant ? '#f97316' : '#3b82f6');
+    const pinIcon = isPharm ? '💊' : (isRestaurant ? '🍽️' : '🏥');
+    const targetIcon = L.divIcon({
+      className: 'cat-marker-pin',
+      html: `<div style="background:${pinBg};color:white;padding:4px 8px;border-radius:10px;font-size:12px;font-weight:800;white-space:nowrap;box-shadow:0 3px 8px rgba(0,0,0,0.3);border:2px solid #ffffff;">${pinIcon} ${place.name}</div>`,
+      iconSize: [80, 26],
+      iconAnchor: [40, 13]
+    });
+    const tm = L.marker([pLat, pLon], { icon: targetIcon }).addTo(map);
+    AppState.categoryMarkers.push(tm);
+
+    const group = L.featureGroup([hm, tm]);
+    map.fitBounds(group.getBounds(), { padding: [40, 40] });
   }
 
-  const isPharm = (h.type === "약국");
+  // 집 ➔ 목적지 네온 경로선 렌더링
+  drawRouteFromHome(pLat, pLon, place.name);
+
+  // 상단 안내창에 단일 포커스 안내 및 전체 핀 복원 버튼 노출
+  const helperEl = document.getElementById("mapHelperText");
+  if (helperEl) {
+    helperEl.innerHTML = `📍 <b>${place.name}</b> 위치 포커스됨 (🏡 우리 집에서 경로선 표시) <button onclick="showAllCategoryMarkers()" style="border:none;background:#f1f5f9;color:#0284c7;font-weight:700;padding:2px 7px;border-radius:6px;font-size:11px;cursor:pointer;margin-left:6px;">📍 전체 핀 보기</button>`;
+  }
+
+  // 바텀 카드 열기
   openSelectedPlaceCard({
-    category: h.type,
-    categoryTitle: isPharm ? "💊 안심 약국" : "🏥 안심 병원",
-    categoryClass: isPharm ? "pharmacy" : "hospital",
-    name: h.name,
-    address: h.address || "경기도 남양주시 평내동",
-    phone: h.phone,
-    status_info: h.status_badge,
-    lat: hLat,
-    lon: hLon,
-    extraHtml: `<div style="color: ${isPharm ? '#059669' : '#2563eb'}; font-weight: 700;">주말/야간: ${h.weekend_info || h.status_badge}</div>`
+    category: isPharm ? "약국" : (isRestaurant ? "식당" : "병원"),
+    categoryTitle: isPharm ? "💊 안심 약국" : (isRestaurant ? "🍽️ 추천 맛집" : "🏥 안심 병원"),
+    categoryClass: isPharm ? "pharmacy" : (isRestaurant ? "restaurant" : "hospital"),
+    name: place.name,
+    address: place.address || "경기도 남양주시 평내동",
+    phone: place.phone,
+    status_info: place.status_badge || "영업중",
+    lat: pLat,
+    lon: pLon,
+    extraHtml: `<div style="color: ${isPharm ? '#059669' : (isRestaurant ? '#ea580c' : '#2563eb')}; font-weight: 700;">${place.weekend_info || place.status_badge || '영업 정보'}</div>`
   });
 }
 
-// 식당 목록에서 선택 시 지도로 즉시 전환 & 핀 포커스
+// 약국/병원 목록에서 선택 시 지도로 즉시 전환 & 단일 핀 포커스 & 즐겨찾기 체크
+function focusHospitalOnMap(idx) {
+  const h = (AppState.cachedHospitals || [])[idx];
+  if (!h) return;
+  focusSinglePlaceOnMap(h, h.type);
+}
+
+// 식당 목록에서 선택 시 지도로 즉시 전환 & 단일 핀 포커스
 function focusRestaurantOnMap(idx) {
   const p = (AppState.cachedPlaces || [])[idx];
   if (!p) return;
-
-  switchDetailView('map');
-
-  const pLat = AppState.location.lat + (Math.sin(idx + 1) * 0.005);
-  const pLon = AppState.location.lon + (Math.cos(idx + 1) * 0.005);
-
-  if (AppState.mapEngine === "kakao" && AppState.kakaoCategoryMap) {
-    AppState.kakaoCategoryMap.setLevel(3);
-    AppState.kakaoCategoryMap.panTo(new kakao.maps.LatLng(pLat, pLon));
-  } else if (AppState.leafletCategoryMap) {
-    AppState.leafletCategoryMap.setView([pLat, pLon], 16);
-  }
-
-  openSelectedPlaceCard({
-    category: "식당",
-    categoryTitle: "🍽️ 추천 맛집",
-    categoryClass: "restaurant",
-    name: p.name,
-    address: p.address || "경기도 남양주시 평내동",
-    phone: p.phone,
-    status_info: p.status_badge || "영업중",
-    lat: pLat,
-    lon: pLon,
-    extraHtml: `<div style="color: #ea580c; font-weight: 700;">${p.status_badge || '평내 단골 인기 식당'}</div>`
-  });
+  focusSinglePlaceOnMap(p, "식당");
 }
 
 // ==========================================
@@ -2010,77 +2143,162 @@ async function filterHospitalList(filterType) {
 }
 
 async function renderRestaurantDetail(el) {
-  const res = await fetch("/api/restaurant/search?query=맛집");
+  const lat = AppState.location.lat;
+  const lon = AppState.location.lon;
+  const res = await fetch(`/api/restaurant/search?query=맛집&lat=${lat}&lon=${lon}`);
   const places = await res.json();
-  AppState.cachedPlaces = places;
-  const favList = AppState.favoritePlaces || [];
+  AppState.cachedPlaces = places || [];
 
   el.innerHTML = `
-    <div style="display: flex; gap: 6px; margin-bottom: 10px;">
-      <input type="text" id="inputSearchRestQuery" placeholder="식당 또는 음식 검색 (예: 갈비, 파스타, 카페)" style="flex: 1; padding: 8px 10px; border-radius: 10px; border: 1px solid #cbd5e1; font-size: 12px;">
-      <button onclick="executeRestSearch()" class="btn-mini" style="background: #0ea5e9; color: white;">검색</button>
+    <!-- 식당/메뉴 검색창 -->
+    <div style="display: flex; gap: 6px; margin-bottom: 8px;">
+      <input type="text" id="inputSearchRestQuery" placeholder="식당, 카페, 메뉴 검색 (예: 순대국, 파스타, 고기)" style="flex: 1; padding: 10px 12px; border-radius: 10px; border: 1.5px solid #cbd5e1; font-size: 13px;" onkeydown="if(event.key==='Enter') executeRestSearch()">
+      <button onclick="executeRestSearch()" class="btn-primary" style="padding: 10px 16px; font-weight: 800; font-size: 13px; background: #0284c7;">검색</button>
+    </div>
+
+    <!-- 빠른 키워드 필터 알약 -->
+    <div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 10px;">
+      <button class="btn-filter-pill" onclick="quickRestSearch('한식')">🍲 한식</button>
+      <button class="btn-filter-pill" onclick="quickRestSearch('중식')">🥟 중식</button>
+      <button class="btn-filter-pill" onclick="quickRestSearch('일식')">🍣 일식/초밥</button>
+      <button class="btn-filter-pill" onclick="quickRestSearch('고기')">🥩 고기/구이</button>
+      <button class="btn-filter-pill" onclick="quickRestSearch('카페')">☕ 카페/디저트</button>
+      <button class="btn-filter-pill" onclick="quickRestSearch('분식')">🍢 분식</button>
+      <button class="btn-filter-pill" onclick="quickRestSearch('치킨')">🍗 치킨</button>
     </div>
 
     <div style="font-size: 11px; color: #0284c7; font-weight: 700; margin-bottom: 8px;">
-      💡 식당 카드를 터치하면 <b>지도 위치로 이동하고 핀이 꽂혀 즐겨찾기를 체크</b>할 수 있습니다!
+      💡 식당 카드를 터치하면 <b>지도 위치로 이동하여 단 1곳만 강조 핀</b>으로 표시되고 우리 집에서의 거리/경로선이 그려집니다!
     </div>
 
-    <div style="display: flex; flex-direction: column; gap: 8px;">
-      ${places.map((p, idx) => {
-        const isFav = favList.some(f => f.name === p.name);
-        return `
-          <div class="item-card" style="cursor: pointer;" onclick="focusRestaurantOnMap(${idx})">
-            <div class="item-card-top">
-              <span class="item-name">${p.name}</span>
-              <span class="item-badge" style="background: #ffedd5; color: #c2410c;">${p.category}</span>
-            </div>
-            <div class="item-desc">📍 ${p.address} (${p.distance})</div>
-            <div class="item-action-row" onclick="event.stopPropagation()">
-              <button class="btn-mini btn-fav" style="background: #e0f2fe; color: #0369a1;" onclick="focusRestaurantOnMap(${idx})">🗺️ 지도 위치 보기</button>
-              <button class="btn-mini btn-fav" style="background: ${isFav ? '#fffbeb' : '#ecfdf5'}; color: ${isFav ? '#b45309' : '#047857'}; border: 1px solid ${isFav ? '#fde68a' : '#a7f3d0'};" onclick="quickAddFavoritePlace('식당', '${p.name}', '${p.address}', '${p.phone}', '${p.status_badge}')">
-                ${isFav ? '★ 단골 취소' : '⭐ 단골 등록'}
-              </button>
-              ${p.phone ? `<a href="tel:${p.phone}" class="btn-mini btn-call">📞 전화</a>` : ''}
-            </div>
-          </div>
-        `;
-      }).join("")}
+    <div id="restaurantListContainer" style="display: flex; flex-direction: column; gap: 8px;">
+      ${buildRestaurantListHtml(AppState.cachedPlaces)}
     </div>
   `;
 }
 
-async function renderCultureDetail(el) {
-  const res = await fetch("/api/culture");
-  const data = await res.json();
+function quickRestSearch(k) {
+  const inp = document.getElementById("inputSearchRestQuery");
+  if (inp) inp.value = k;
+  executeRestSearch();
+}
 
-  el.innerHTML = `
-    <div style="font-size: 13px; font-weight: 800; margin-bottom: 8px;">🚦 주말 핫스팟 붐빔 예측 신호등</div>
-    <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;">
-      ${(data.crowd_spots || []).map(s => `
-        <div class="weekly-row">
-          <span style="font-size: 12px; font-weight: 800;">${s.spot_name}</span>
-          <span style="font-size: 11px; font-weight: 700;">${s.level_badge}</span>
-        </div>
-      `).join("")}
-    </div>
+async function executeRestSearch() {
+  const inp = document.getElementById("inputSearchRestQuery");
+  const q = inp ? inp.value.trim() : "";
+  if (!q) {
+    showToast("검색할 식당명이나 메뉴를 입력해 주세요.", "info");
+    return;
+  }
 
-    <div style="font-size: 13px; font-weight: 800; margin-bottom: 8px;">🎪 당월 지역 축제 & 나들이</div>
-    <div style="display: flex; flex-direction: column; gap: 8px;">
-      ${(data.festivals || []).map(f => `
-        <div class="item-card">
-          <div class="item-card-top">
-            <span class="item-name">${f.title}</span>
-            <span class="item-badge" style="background: #fef3c7; color: #b45309;">${f.expected_crowd}</span>
+  const container = document.getElementById("restaurantListContainer");
+  if (container) {
+    container.innerHTML = `<div style="text-align: center; padding: 24px; color: #64748b; font-size: 12.5px;">🔍 '<b>${q}</b>' 식당 검색 중입니다... 🍽️</div>`;
+  }
+
+  try {
+    const lat = AppState.location.lat;
+    const lon = AppState.location.lon;
+    const res = await fetch(`/api/restaurant/search?query=${encodeURIComponent(q)}&lat=${lat}&lon=${lon}`);
+    const places = await res.json();
+    AppState.cachedPlaces = places || [];
+
+    if (container) {
+      if (AppState.cachedPlaces.length > 0) {
+        container.innerHTML = buildRestaurantListHtml(AppState.cachedPlaces);
+        showToast(`🍽️ '${q}' 관련 식당 ${AppState.cachedPlaces.length}곳을 찾았습니다!`, "info");
+      } else {
+        container.innerHTML = `
+          <div style="text-align: center; padding: 30px 16px; background: #f8fafc; border-radius: 12px; border: 1px dashed #cbd5e1;">
+            <div style="font-size: 24px; margin-bottom: 6px;">🍽️</div>
+            <div style="font-size: 13px; font-weight: 800; color: #334155; margin-bottom: 4px;">'${q}' 검색 결과가 없습니다.</div>
+            <div style="font-size: 11.5px; color: #64748b;">주변 지역 맛집 또는 다른 키워드(예: 순대국, 파스타, 카페)로 검색해 보세요.</div>
           </div>
-          <div class="item-desc">기간: ${f.period}</div>
-          <div class="item-desc" style="color: #64748b; font-size: 11px;">📍 ${f.location}</div>
-          <div class="item-action-row">
-            <button class="btn-mini btn-fav" onclick="quickAddFavoritePlace('축제', '${f.title}', '${f.location}', '', '${f.period}')">⭐ 축제 찜하기</button>
-          </div>
+        `;
+      }
+    }
+  } catch (err) {
+    if (container) {
+      container.innerHTML = `<div style="padding: 16px; color: #ef4444; font-size: 12px;">검색 통신 중 오류가 발생했습니다.</div>`;
+    }
+  }
+}
+
+function buildRestaurantListHtml(places) {
+  const favList = AppState.favoritePlaces || [];
+  return places.map((p, idx) => {
+    const isFav = favList.some(f => f.name === p.name);
+    return `
+      <div class="item-card" style="cursor: pointer;" onclick="focusRestaurantOnMap(${idx})">
+        <div class="item-card-top">
+          <span class="item-name" style="font-size: 13px;">${p.name}</span>
+          <span class="item-badge" style="background: #ffedd5; color: #c2410c;">${p.category}</span>
         </div>
-      `).join("")}
-    </div>
-  `;
+        <div class="item-desc">📍 ${p.address} (${p.distance})</div>
+        <div class="item-action-row" onclick="event.stopPropagation()">
+          <button class="btn-mini btn-fav" style="background: #e0f2fe; color: #0369a1; font-weight: 700;" onclick="focusRestaurantOnMap(${idx})">🗺️ 지도 위치 보기</button>
+          <button class="btn-mini btn-fav" style="background: ${isFav ? '#fffbeb' : '#ecfdf5'}; color: ${isFav ? '#b45309' : '#047857'}; border: 1px solid ${isFav ? '#fde68a' : '#a7f3d0'};" onclick="quickAddFavoritePlace('식당', '${p.name}', '${p.address}', '${p.phone}', '${p.status_badge}')">
+            ${isFav ? '★ 단골 취소' : '⭐ 단골 등록'}
+          </button>
+          ${p.phone && p.phone !== '정보없음' ? `<a href="tel:${p.phone}" class="btn-mini btn-call">📞 ${p.phone}</a>` : ''}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function renderCultureDetail(el, currentScope = "local") {
+  el.innerHTML = '<div style="padding: 24px; text-align: center; color: #64748b;">🎪 축제 및 나들이 정보를 불러오는 중입니다...</div>';
+
+  try {
+    const res = await fetch(`/api/culture?scope=${currentScope}&lat=${AppState.location.lat}&lon=${AppState.location.lon}`);
+    const data = await res.json();
+    const festivals = data.festivals || [];
+
+    el.innerHTML = `
+      <!-- 지역 한정 vs 전국 확대 탭 토글 바 -->
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <button class="btn-mini" style="flex: 1; padding: 10px 8px; font-weight: 800; font-size: 12px; border-radius: 10px; cursor: pointer; transition: all 0.15s; background: ${currentScope === 'local' ? '#0284c7' : '#f1f5f9'}; color: ${currentScope === 'local' ? 'white' : '#475569'}; border: 1px solid ${currentScope === 'local' ? '#0284c7' : '#cbd5e1'};" onclick="renderCultureDetail(document.getElementById('categoryDetailContent'), 'local')">
+          📍 내 주변 (경기/수도권 축제)
+        </button>
+        <button class="btn-mini" style="flex: 1; padding: 10px 8px; font-weight: 800; font-size: 12px; border-radius: 10px; cursor: pointer; transition: all 0.15s; background: ${currentScope === 'all' ? '#0284c7' : '#f1f5f9'}; color: ${currentScope === 'all' ? 'white' : '#475569'}; border: 1px solid ${currentScope === 'all' ? '#0284c7' : '#cbd5e1'};" onclick="renderCultureDetail(document.getElementById('categoryDetailContent'), 'all')">
+          🌐 전국 축제 전체보기
+        </button>
+      </div>
+
+      <div style="font-size: 13px; font-weight: 800; margin-bottom: 8px;">🚦 주말 핫스팟 붐빔 예측 신호등</div>
+      <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;">
+        ${(data.crowd_spots || []).map(s => `
+          <div class="weekly-row">
+            <span style="font-size: 12px; font-weight: 800;">${s.spot_name}</span>
+            <span style="font-size: 11px; font-weight: 700;">${s.level_badge}</span>
+          </div>
+        `).join("")}
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <span style="font-size: 13px; font-weight: 800;">🎪 ${data.scope_desc || (currentScope === 'local' ? '내 주변 경기/수도권 축제' : '전국 축제')} (${festivals.length}곳)</span>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        ${festivals.map(f => `
+          <div class="item-card">
+            <div class="item-card-top">
+              <span class="item-name" style="font-size: 13px;">${f.title}</span>
+              <span class="item-badge" style="background: #fef3c7; color: #b45309;">${f.expected_crowd}</span>
+            </div>
+            <div class="item-desc">📅 기간: ${f.period}</div>
+            <div class="item-desc" style="color: #64748b; font-size: 11px;">📍 ${f.location}</div>
+            <div class="item-action-row">
+              <button class="btn-mini btn-fav" onclick="quickAddFavoritePlace('축제', '${f.title}', '${f.location}', '', '${f.period}')">⭐ 축제 찜하기</button>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  } catch (err) {
+    el.innerHTML = '<div style="padding: 16px; color: #ef4444;">축제 정보를 불러오는 중 오류가 발생했습니다.</div>';
+  }
 }
 
 async function renderHealthDetail(el) {
@@ -2980,6 +3198,93 @@ async function deleteTransitRoute(routeId) {
     }
   } catch (e) {
     alert("삭제 중 오류가 발생했습니다.");
+  }
+}
+
+// 즐겨찾기 장소 삭제
+async function deleteFavoritePlace(placeId) {
+  if (!confirm("이 즐겨찾기 장소를 삭제하시겠습니까?")) return;
+  try {
+    await fetch(`/api/places/favorite/${placeId}`, { method: "DELETE" });
+    showToast("🗑️ 즐겨찾기 장소가 삭제되었습니다.", "info");
+    loadFavorites();
+  } catch (e) {
+    alert("삭제 중 오류가 발생했습니다.");
+  }
+}
+
+// 즐겨찾기 장소 수정 모달 열기
+function openEditPlaceModal(favItem) {
+  const modal = document.getElementById("modalEditFavorite");
+  if (!modal) return;
+  document.getElementById("editFavType").value = "place";
+  document.getElementById("editFavId").value = favItem.id;
+  document.getElementById("editFavName").value = favItem.name || "";
+  document.getElementById("editFavSub").value = favItem.phone || favItem.status_info || "";
+  document.getElementById("editFavSubLabel").innerText = "전화번호 / 상태 정보";
+  document.getElementById("editFavMemo").value = favItem.memo || "";
+  modal.className = "modal-overlay active";
+}
+
+// 즐겨찾기 버스 루트 수정 모달 열기
+function openEditTransitModal(routeItem) {
+  const modal = document.getElementById("modalEditFavorite");
+  if (!modal) return;
+  document.getElementById("editFavType").value = "transit";
+  document.getElementById("editFavId").value = routeItem.id;
+  document.getElementById("editFavName").value = routeItem.title || "";
+  document.getElementById("editFavSub").value = routeItem.route_no || "";
+  document.getElementById("editFavSubLabel").innerText = "버스 노선 번호 (예: 165, 1000)";
+  document.getElementById("editFavMemo").value = routeItem.destination || routeItem.dest_station_name || "";
+  modal.className = "modal-overlay active";
+}
+
+function closeEditFavoriteModal(event) {
+  if (event && event.target && event.target.id !== "modalEditFavorite" && !event.target.classList.contains("sheet-close-btn") && event.target.tagName !== "BUTTON") {
+    return;
+  }
+  const modal = document.getElementById("modalEditFavorite");
+  if (modal) modal.className = "modal-overlay";
+}
+
+async function saveFavoriteEdit() {
+  const favType = document.getElementById("editFavType").value;
+  const favId = document.getElementById("editFavId").value;
+  const name = document.getElementById("editFavName").value.trim();
+  const sub = document.getElementById("editFavSub").value.trim();
+  const memo = document.getElementById("editFavMemo").value.trim();
+
+  if (!name) {
+    alert("이름 또는 명칭을 입력해 주세요.");
+    return;
+  }
+
+  try {
+    if (favType === "place") {
+      await fetch(`/api/places/favorite/${favId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, phone: sub, memo })
+      });
+      showToast("✏️ 즐겨찾기 장소 정보가 수정되었습니다!", "info");
+    } else {
+      await fetch(`/api/transit/${favId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: name, route_no: sub, target_destination: memo, dest_station_name: memo })
+      });
+      showToast("✏️ 즐겨찾기 버스 루트 정보가 수정되었습니다!", "info");
+    }
+
+    closeEditFavoriteModal();
+    loadFavorites();
+
+    if (AppState.currentCategory === "transit") {
+      const el = document.getElementById("categoryDetailContent");
+      if (el) renderTransitDetail(el);
+    }
+  } catch (e) {
+    alert("수정 저장 중 오류가 발생했습니다.");
   }
 }
 

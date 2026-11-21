@@ -56,3 +56,33 @@ async def remove_favorite_place(place_id: int):
     conn.commit()
     conn.close()
     return {"success": True}
+
+async def update_favorite_place(place_id: int, name: str = None, memo: str = None, phone: str = None, status_info: str = None):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    updates = []
+    params = []
+    if name is not None:
+        updates.append("name = ?")
+        params.append(name)
+    if memo is not None:
+        updates.append("memo = ?")
+        params.append(memo)
+    if phone is not None:
+        updates.append("phone = ?")
+        params.append(phone)
+    if status_info is not None:
+        updates.append("status_info = ?")
+        params.append(status_info)
+        
+    if not updates:
+        conn.close()
+        return {"success": True}
+        
+    params.append(place_id)
+    sql = f"UPDATE favorite_places SET {', '.join(updates)} WHERE id = ?"
+    cursor.execute(sql, tuple(params))
+    conn.commit()
+    conn.close()
+    return {"success": True}

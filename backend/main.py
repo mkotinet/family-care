@@ -13,9 +13,9 @@ from backend.database import init_db
 from backend.services.auth import authenticate_user, get_user_by_token, get_family_members_list, touch_user_heartbeat
 from backend.services.location import update_user_location, get_family_locations, request_child_ping
 from backend.services.chat import get_chat_rooms, get_messages, send_message
-from backend.services.places import add_favorite_place, get_favorite_places, remove_favorite_place
+from backend.services.places import add_favorite_place, get_favorite_places, remove_favorite_place, update_favorite_place
 from backend.services.weather import get_weather_data
-from backend.services.transit import get_transit_routes, add_favorite_route, delete_favorite_route, search_nearby_bus_stops, get_station_arrivals
+from backend.services.transit import get_transit_routes, add_favorite_route, delete_favorite_route, update_favorite_route, search_nearby_bus_stops, get_station_arrivals
 from backend.services.hospital import get_hospital_pharmacy_info
 from backend.services.restaurant import get_favorite_restaurants, add_favorite_restaurant, search_places_kakao
 from backend.services.health import get_health_alerts
@@ -279,6 +279,17 @@ async def api_places_favorite_remove(place_id: int):
     res = await remove_favorite_place(place_id)
     return res
 
+@app.put("/api/places/favorite/{place_id}")
+async def api_places_favorite_update(place_id: int, payload: dict = Body(...)):
+    res = await update_favorite_place(
+        place_id=place_id,
+        name=payload.get("name"),
+        memo=payload.get("memo"),
+        phone=payload.get("phone"),
+        status_info=payload.get("status_info")
+    )
+    return res
+
 # --- 5. 날씨 상세 (1시간별 / 3시간별 / 주간) ---
 @app.get("/api/weather")
 async def api_weather(lat: float = Query(None), lon: float = Query(None)):
@@ -324,6 +335,17 @@ async def api_transit_delete(route_id: int):
     res = await delete_favorite_route(route_id)
     return {"success": res}
 
+@app.put("/api/transit/{route_id}")
+async def api_transit_update(route_id: int, payload: dict = Body(...)):
+    res = await update_favorite_route(
+        route_id=route_id,
+        title=payload.get("title"),
+        route_no=payload.get("route_no"),
+        target_destination=payload.get("target_destination"),
+        dest_station_name=payload.get("dest_station_name")
+    )
+    return {"success": res}
+
 # --- 7. 병원 & 당번약국 ---
 @app.get("/api/hospital")
 async def api_hospital(lat: float = Query(None), lon: float = Query(None), filter_type: str = Query("ALL")):
@@ -354,10 +376,10 @@ async def api_health(lat: float = Query(None), lon: float = Query(None)):
     return data
 
 @app.get("/api/culture")
-async def api_culture(lat: float = Query(None), lon: float = Query(None)):
+async def api_culture(lat: float = Query(None), lon: float = Query(None), scope: str = Query("local")):
     lat = lat if lat is not None else DEFAULT_LOCATION["lat"]
     lon = lon if lon is not None else DEFAULT_LOCATION["lon"]
-    data = await get_culture_and_crowd(lat, lon)
+    data = await get_culture_and_crowd(lat, lon, scope)
     return data
 
 if __name__ == "__main__":

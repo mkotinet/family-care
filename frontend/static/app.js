@@ -367,7 +367,7 @@ function saveKakaoJsKey() {
 }
 
 function getKakaoJsKey() {
-  return localStorage.getItem("family_kakao_js_key") || AppState.kakao_js_key || "";
+  return localStorage.getItem("family_kakao_js_key") || AppState.kakao_js_key || "601649d245ace3f6733d5c4b74bd3a06";
 }
 
 function updateMapEngineBadge(badgeId) {

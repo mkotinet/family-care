@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=4.0, user-scalable=yes, viewport-fit=cover">
   <title>우리가족챙기기 - 데일리 라이프 비서</title>
-  <link rel="stylesheet" href="/static/style.css?v=1.4.9">
-  <link rel="manifest" href="/manifest.json?v=1.4.9">
+  <link rel="stylesheet" href="/static/style.css?v=1.5.0">
+  <link rel="manifest" href="/manifest.json?v=1.5.0">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="/static/icons/icon-512.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png">
@@ -506,6 +506,51 @@
     </div>
   </div>
 
+  <!-- 8-1. [모달] 채팅 공유 위치 지도 뷰어 모달 (메시지 핀 터치 시 지도 팝업) -->
+  <div class="modal-overlay" id="modalChatMessageMap" onclick="closeChatMessageLocationMap(event)">
+    <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 480px; padding: 18px; border-radius: 18px;">
+      <div class="modal-header" style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+        <div class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">📍</span>
+          <div>
+            <strong id="chatMapSenderName" style="font-size: 15px; color: #0f172a;">공유된 위치</strong>
+            <div id="chatMapTimeStr" style="font-size: 11px; color: #64748b; font-weight: 600;">실시간 위치 공유</div>
+          </div>
+        </div>
+        <button class="sheet-close-btn" onclick="closeChatMessageLocationMap()">✕</button>
+      </div>
+
+      <!-- 지도 캔버스 영역 -->
+      <div id="chatMessageKakaoMap" style="width: 100%; height: 280px; border-radius: 14px; overflow: hidden; border: 1.5px solid #cbd5e1; box-shadow: inset 0 2px 6px rgba(0,0,0,0.06); margin-bottom: 12px; position: relative; background: #f8fafc;">
+        <!-- 카카오맵 / Leaflet 엔진이 여기에 마운트됨 -->
+      </div>
+
+      <!-- 하단 상세 위치 정보 카드 -->
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; margin-bottom: 12px;">
+        <div style="display: flex; align-items: flex-start; gap: 6px; margin-bottom: 6px;">
+          <span style="font-size: 15px;">📌</span>
+          <div>
+            <div id="chatMapLandmark" style="font-weight: 800; font-size: 13.5px; color: #0f172a;">위치 명칭</div>
+            <div id="chatMapAddress" style="font-size: 11.5px; color: #64748b; margin-top: 2px;">상세 주소</div>
+          </div>
+        </div>
+        <div id="chatMapDistanceBadge" style="display: inline-block; font-size: 11px; font-weight: 700; color: #0284c7; background: #e0f2fe; padding: 3px 8px; border-radius: 6px;">
+          🏡 우리 집과의 거리 계산 중...
+        </div>
+      </div>
+
+      <!-- 액션 버튼 바 -->
+      <div style="display: flex; gap: 8px;">
+        <a id="btnChatMapKakaoLink" href="#" target="_blank" class="btn-primary" style="flex: 2; padding: 11px; font-size: 12.5px; font-weight: 800; background: #fee500; color: #191919; border: 1px solid #e5ce00; display: flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; border-radius: 10px; box-shadow: 0 2px 6px rgba(254, 229, 0, 0.4);">
+          🚗 카카오맵 길찾기
+        </a>
+        <button onclick="closeChatMessageLocationMap()" class="btn-secondary" style="flex: 1; padding: 11px; font-size: 12px; border-radius: 10px;">
+          닫기
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- 9. [모달] 하루퀴즈 포맷 4인 가족 간편 로그인 & 계정 전환 모달 -->
   <div class="modal-overlay" id="modalAuthLogin" onclick="closeLoginModal(event)">
     <div class="modal-content auth-modal-card" onclick="event.stopPropagation()">
@@ -849,6 +894,6 @@
     <span class="zoom-reset-btn" title="기본 크기로 복귀">✕ 리셋</span>
   </div>
 
-  <script src="/static/app.js?v=1.4.9"></script>
+  <script src="/static/app.js?v=1.5.0"></script>
 </body>
 </html>

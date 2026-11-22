@@ -3970,6 +3970,7 @@ async function loadChatMessages(roomId) {
     const res = await fetch(`/api/chat/messages?room_id=${roomId}`);
     const msgs = await res.json();
     const scrollEl = document.getElementById("chatMessagesScroll");
+    AppState.cachedChatMessages = msgs || [];
 
     const currentUname = AppState.currentUser ? AppState.currentUser.username : "미니미니";
 
@@ -3994,8 +3995,18 @@ async function loadChatMessages(roomId) {
             <div class="chat-bubble">
               ${m.text}
               ${m.msg_type === 'LOCATION' && m.location_data ? `
-                <div class="chat-location-card">
-                  📍 <strong>${m.location_data.landmark || m.location_data.address}</strong>
+                <div class="chat-location-card" onclick="openChatMessageLocationMapById(${m.id}); event.stopPropagation();" title="터치하여 지도에서 위치 확인">
+                  <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
+                    <span style="font-weight: 800; color: #0284c7; font-size: 12.5px;">📍 ${m.location_data.landmark || '실시간 위치 공유'}</span>
+                    <span style="font-size: 10.5px; color: #64748b;">${m.time_str}</span>
+                  </div>
+                  <div style="font-size: 11px; color: #475569; margin: 3px 0 6px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    ${m.location_data.address || '남양주시 평내동 안심 위치'}
+                  </div>
+                  <div class="chat-location-pin-btn">
+                    <span>🗺️ 핀 눌러서 지도 보기</span>
+                    <span>➔</span>
+                  </div>
                 </div>
               ` : ''}
             </div>
@@ -4045,6 +4056,8 @@ async function sendLocationInChat() {
     return;
   }
 
+  const senderRole = (AppState.currentUser && AppState.currentUser.role_title) || (AppState.currentUser && AppState.currentUser.name) || "가족";
+
   navigator.geolocation.getCurrentPosition(async (pos) => {
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
@@ -4056,19 +4069,193 @@ async function sendLocationInChat() {
         body: JSON.stringify({
           room_id: AppState.currentChatRoom,
           sender_username: AppState.currentUser ? AppState.currentUser.username : "미니미니",
-          text: "📍 현재 내 위치를 공유합니다!",
+          text: `📍 ${senderRole} 님이 현재 위치를 공유했습니다!`,
           msg_type: "LOCATION",
           location_data: {
             latitude: lat,
             longitude: lon,
-            landmark: "평내동 안심 위치",
-            address: AppState.location.address
+            landmark: `${senderRole} 님의 실시간 위치`,
+            address: AppState.location.address || "경기도 남양주시 평내동"
           }
         })
       });
+      showToast("📍 현재 위치를 채팅방에 공유했습니다!", "info");
       loadChatMessages(AppState.currentChatRoom);
     } catch (e) {}
+  }, (err) => {
+    console.warn("Geolocation error, using default home position:", err);
+    // GPS 실패 시 기본 위치로 공유 지원
+    fetch("/api/chat/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        room_id: AppState.currentChatRoom,
+        sender_username: AppState.currentUser ? AppState.currentUser.username : "미니미니",
+        text: `📍 ${senderRole} 님이 현재 위치를 공유했습니다!`,
+        msg_type: "LOCATION",
+        location_data: {
+          latitude: AppState.location.lat,
+          longitude: AppState.location.lon,
+          landmark: `${senderRole} 님의 안심 위치 (우리 집 인근)`,
+          address: AppState.location.address || "경기도 남양주시 평내동"
+        }
+      })
+    }).then(() => {
+      showToast("📍 현재 위치를 채팅방에 공유했습니다!", "info");
+      loadChatMessages(AppState.currentChatRoom);
+    });
   });
+}
+
+// ==========================================
+// 8-2. 채팅 공유 위치 지도 모달 열기/닫기 (핀 터치 시 지도 팝업)
+// ==========================================
+let chatMessageKakaoMapInstance = null;
+let chatMessageLeafletMapInstance = null;
+
+async function openChatMessageLocationMapById(msgId) {
+  const msg = (AppState.cachedChatMessages || []).find(m => m.id == msgId);
+  if (!msg || !msg.location_data) {
+    alert("위치 정보를 찾을 수 없습니다.");
+    return;
+  }
+  const loc = msg.location_data;
+  const lat = Number(loc.latitude || loc.lat || AppState.location.lat);
+  const lon = Number(loc.longitude || loc.lon || AppState.location.lon);
+  const landmark = loc.landmark || "공유된 위치";
+  const address = loc.address || AppState.location.address || "경기도 남양주시 평내동";
+  const senderName = msg.sender_name || "가족";
+  const timeStr = msg.time_str || "";
+
+  await openChatMessageLocationMap(lat, lon, landmark, address, senderName, timeStr);
+}
+
+async function openChatMessageLocationMap(lat, lon, landmark, address, senderName, timeStr) {
+  const modal = document.getElementById("modalChatMessageMap");
+  if (!modal) return;
+
+  // 1. 텍스트 정보 세팅
+  const nameEl = document.getElementById("chatMapSenderName");
+  if (nameEl) nameEl.textContent = `📍 ${senderName} 님의 위치`;
+
+  const timeEl = document.getElementById("chatMapTimeStr");
+  if (timeEl) timeEl.textContent = timeStr ? `${timeStr} 실시간 공유` : "실시간 위치 공유";
+
+  const landmarkEl = document.getElementById("chatMapLandmark");
+  if (landmarkEl) landmarkEl.textContent = landmark;
+
+  const addrEl = document.getElementById("chatMapAddress");
+  if (addrEl) addrEl.textContent = address;
+
+  // 2. 우리집과의 거리 계산 및 뱃지 표출
+  const distEl = document.getElementById("chatMapDistanceBadge");
+  if (distEl) {
+    const R = 6371000;
+    const dLat = (lat - AppState.location.lat) * Math.PI / 180;
+    const dLon = (lon - AppState.location.lon) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(AppState.location.lat * Math.PI / 180) * Math.cos(lat * Math.PI / 180) * Math.sin(dLon/2)**2;
+    const dMeters = Math.round(2 * R * Math.asin(Math.sqrt(a)));
+    const dText = dMeters >= 1000 ? `${(dMeters / 1000).toFixed(1)}km` : `${dMeters}m`;
+    distEl.textContent = `🏡 우리 집에서 약 ${dText} 거리`;
+  }
+
+  // 3. 카카오맵 길찾기 링크 URL
+  const linkBtn = document.getElementById("btnChatMapKakaoLink");
+  if (linkBtn) {
+    linkBtn.href = `https://map.kakao.com/link/to/${encodeURIComponent(landmark || senderName + ' 위치')},${lat},${lon}`;
+  }
+
+  // 4. 모달 액티브 표시
+  modal.className = "modal-overlay active";
+
+  // 5. 지도 컨테이너 렌더링
+  const container = document.getElementById("chatMessageKakaoMap");
+  if (!container) return;
+
+  const kakaoReady = await loadKakaoSdk();
+  if (kakaoReady && typeof kakao !== "undefined" && kakao.maps && kakao.maps.Map) {
+    container.innerHTML = "";
+    chatMessageKakaoMapInstance = new kakao.maps.Map(container, {
+      center: new kakao.maps.LatLng(lat, lon),
+      level: 3
+    });
+
+    const targetPos = new kakao.maps.LatLng(lat, lon);
+    const targetMarker = new kakao.maps.Marker({
+      position: targetPos,
+      map: chatMessageKakaoMapInstance
+    });
+
+    const targetOverlay = new kakao.maps.CustomOverlay({
+      position: targetPos,
+      content: `<div style="background:#0284c7; color:#ffffff; padding:4px 10px; border-radius:10px; font-size:12px; font-weight:800; white-space:nowrap; box-shadow:0 3px 8px rgba(0,0,0,0.3); border:1.5px solid #ffffff;">📍 ${senderName} 위치</div>`,
+      yAnchor: 2.2
+    });
+    targetOverlay.setMap(chatMessageKakaoMapInstance);
+
+    // 우리집 마커도 함께 표시
+    const homePos = new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon);
+    const homeMarker = new kakao.maps.Marker({
+      position: homePos,
+      map: chatMessageKakaoMapInstance
+    });
+    const homeOverlay = new kakao.maps.CustomOverlay({
+      position: homePos,
+      content: `<div style="background:#0f172a; color:#ffffff; padding:3px 7px; border-radius:8px; font-size:11px; font-weight:800; border:1px solid #ffffff; box-shadow:0 2px 6px rgba(0,0,0,0.2);">🏡 우리 집</div>`,
+      yAnchor: 2.2
+    });
+    homeOverlay.setMap(chatMessageKakaoMapInstance);
+
+    setTimeout(() => {
+      if (chatMessageKakaoMapInstance) {
+        chatMessageKakaoMapInstance.relayout();
+        chatMessageKakaoMapInstance.setCenter(targetPos);
+      }
+    }, 150);
+  } else {
+    // Leaflet fallback
+    if (chatMessageLeafletMapInstance) {
+      try { chatMessageLeafletMapInstance.remove(); } catch (e) {}
+      chatMessageLeafletMapInstance = null;
+    }
+    container.innerHTML = "";
+    chatMessageLeafletMapInstance = L.map(container).setView([lat, lon], 15);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }).addTo(chatMessageLeafletMapInstance);
+
+    const targetIcon = L.divIcon({
+      className: 'cat-marker-pin',
+      html: `<div style="background:#0284c7;color:white;padding:3px 8px;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);border:1px solid #ffffff;">📍 ${senderName} 위치</div>`,
+      iconSize: [110, 24],
+      iconAnchor: [55, 12]
+    });
+    L.marker([lat, lon], { icon: targetIcon }).addTo(chatMessageLeafletMapInstance);
+
+    const homeIcon = L.divIcon({
+      className: 'cat-marker-pin',
+      html: `<div style="background:#0f172a;color:white;padding:3px 6px;border-radius:8px;font-size:10px;font-weight:800;white-space:nowrap;border:1px solid #ffffff;">🏡 우리 집</div>`,
+      iconSize: [60, 22],
+      iconAnchor: [30, 11]
+    });
+    L.marker([AppState.location.lat, AppState.location.lon], { icon: homeIcon }).addTo(chatMessageLeafletMapInstance);
+
+    setTimeout(() => {
+      if (chatMessageLeafletMapInstance) {
+        chatMessageLeafletMapInstance.invalidateSize();
+        chatMessageLeafletMapInstance.panTo([lat, lon]);
+      }
+    }, 150);
+  }
+}
+
+function closeChatMessageLocationMap(e) {
+  if (e && e.target && e.target.id !== "modalChatMessageMap" && !e.target.classList.contains("sheet-close-btn") && !e.target.classList.contains("btn-secondary")) {
+    return;
+  }
+  const modal = document.getElementById("modalChatMessageMap");
+  if (modal) modal.className = "modal-overlay";
 }
 
 // ==========================================
@@ -4705,4 +4892,7 @@ window.refreshMyLocation = refreshMyLocation;
 window.initPinchToZoomEngine = initPinchToZoomEngine;
 window.applyPageZoom = applyPageZoom;
 window.resetPageZoom = resetPageZoom;
+window.openChatMessageLocationMapById = openChatMessageLocationMapById;
+window.openChatMessageLocationMap = openChatMessageLocationMap;
+window.closeChatMessageLocationMap = closeChatMessageLocationMap;
 

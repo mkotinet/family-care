@@ -1,10 +1,9 @@
-import urllib.request
 import urllib.parse
-import json
 from datetime import datetime
 import zoneinfo
 from backend.config import DATA_GO_KR_API_KEY, TIMEZONE
 from backend.database import get_cached_data, set_cached_data
+from backend.http_client import async_http_get_json
 from backend.mock_data import get_simulated_culture
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
@@ -82,31 +81,29 @@ async def get_culture_and_crowd(lat: float = 37.643421, lon: float = 127.236018,
             if scope == "local":
                 params["areaCode"] = "31"  # 경기도
 
-            req = urllib.request.Request(f"{url}?{urllib.parse.urlencode(params)}")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-                if isinstance(items, dict):
-                    items = [items]
+            data = await async_http_get_json(f"{url}?{urllib.parse.urlencode(params)}", timeout=5.0)
+            items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            if isinstance(items, dict):
+                items = [items]
 
-                for it in items:
-                    title = it.get("title", "")
-                    addr = it.get("addr1", "")
-                    img = it.get("firstimage") or it.get("firstimage2")
-                    s_date = it.get("eventstartdate", "")
-                    e_date = it.get("eventenddate", "")
-                    period = f"{s_date[:4]}.{s_date[4:6]}.{s_date[6:]} ~ {e_date[:4]}.{e_date[4:6]}.{e_date[6:]}" if len(s_date) == 8 and len(e_date) == 8 else "상시 진행"
+            for it in items:
+                title = it.get("title", "")
+                addr = it.get("addr1", "")
+                img = it.get("firstimage") or it.get("firstimage2")
+                s_date = it.get("eventstartdate", "")
+                e_date = it.get("eventenddate", "")
+                period = f"{s_date[:4]}.{s_date[4:6]}.{s_date[6:]} ~ {e_date[:4]}.{e_date[4:6]}.{e_date[6:]}" if len(s_date) == 8 and len(e_date) == 8 else "상시 진행"
 
-                    festivals.append({
-                        "title": title,
-                        "location": addr or ("경기/수도권 일대" if scope == "local" else "전국"),
-                        "period": period,
-                        "category": "축제/전시",
-                        "image": img or "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=400&q=80",
-                        "expected_crowd": "보통 (나들이 적합) 👨‍👩‍👧",
-                        "crowd_badge": "🟡 보통",
-                        "is_local": scope == "local"
-                    })
+                festivals.append({
+                    "title": title,
+                    "location": addr or ("경기/수도권 일대" if scope == "local" else "전국"),
+                    "period": period,
+                    "category": "축제/전시",
+                    "image": img or "https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?w=400&q=80",
+                    "expected_crowd": "보통 (나들이 적합) 👨‍👩‍👧",
+                    "crowd_badge": "🟡 보통",
+                    "is_local": scope == "local"
+                })
         except Exception:
             pass
 

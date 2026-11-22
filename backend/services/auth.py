@@ -1,15 +1,13 @@
 import hashlib
 import hmac
-import json
 import secrets
 import time
-import urllib.parse
-import urllib.request
 from collections import defaultdict
 from datetime import datetime
 import zoneinfo
 from backend.config import TIMEZONE
 from backend.database import get_db_connection, write_audit_log
+from backend.http_client import async_http_post_json
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 SALT = "haru_salt_2026"
@@ -39,20 +37,18 @@ def _record_login_failure(key: str):
 def _clear_login_failures(key: str):
     _login_fail_buckets.pop(key, None)
 
-def verify_with_haru_quiz(username: str, password: str) -> bool:
-    """하루퀴즈(haru.danminlove.com) 공식 계정 로그인 실시간 연동 검증"""
+async def verify_with_haru_quiz(username: str, password: str) -> bool:
+    """하루퀴즈(haru.danminlove.com) 공식 계정 로그인 비블로킹 실시간 연동 검증"""
     try:
         url = "https://haru.danminlove.com/api/auth/login"
-        payload = json.dumps({"username": username, "password": password}).encode("utf-8")
-        req = urllib.request.Request(
+        data = await async_http_post_json(
             url,
-            data=payload,
-            headers={"Content-Type": "application/json", "User-Agent": "FamilyCare-App/1.4.3"}
+            {"username": username, "password": password},
+            headers={"User-Agent": "FamilyCare-App/1.7.0"},
+            timeout=4.0,
         )
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if data.get("success"):
-                return True
+        if data.get("success"):
+            return True
     except Exception:
         pass
     return False
@@ -88,8 +84,8 @@ async def authenticate_user(username: str, password: str = "", device_info: str 
         write_audit_log(username, "LOGIN", "FAIL", "DB 사용자 없음", client_ip, user_agent)
         return {"success": False, "message": "사용자를 찾을 수 없습니다."}
 
-    # 1. 하루퀴즈 실시간 연동 검증
-    haru_ok = verify_with_haru_quiz(username, password)
+    # 1. 하루퀴즈 실시간 연동 검증 (비블로킹)
+    haru_ok = await verify_with_haru_quiz(username, password)
 
     stored_hash = user["password_hash"] or ""
     input_hash = hash_password(password)

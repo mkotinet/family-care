@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=4.0, user-scalable=yes, viewport-fit=cover">
   <title>우리가족챙기기 - 데일리 라이프 비서</title>
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <link rel="stylesheet" href="/static/style.css?v=1.6.0">
-  <link rel="manifest" href="/manifest.json?v=1.6.0">
+  <link rel="stylesheet" href="/static/style.css?v=1.7.0">
+  <link rel="manifest" href="/manifest.json?v=1.7.0">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="/static/icons/icon-512.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png">
@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="우리가족챙기기">
-  <meta name="app-version" content="1.6.0">
+  <meta name="app-version" content="1.7.0">
 
   <!-- Leaflet 오픈스트리트맵 엔진 (카카오맵 인증/로딩 실패 시 즉시 자동 폴백 / SRI 무결성 검증 적용) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -64,30 +64,31 @@
 
       <div class="header-actions">
         <!-- PWA 원클릭 앱 설치 버튼 (안드로이드/데스크톱 크롬 지원) -->
-        <button class="header-btn" id="btnPwaInstall" onclick="triggerPwaInstall()" title="앱 홈 화면에 설치 / 저장" style="display: none; background: #e0f2fe; color: #0284c7; border: 1.5px solid #7dd3fc; font-weight: 800; font-size: 11px; padding: 4px 8px;">
+        <button class="header-btn" id="btnPwaInstall" onclick="triggerPwaInstall()" title="앱 홈 화면에 설치 / 저장" aria-label="홈 화면에 앱 설치" style="display: none; background: #e0f2fe; color: #0284c7; border: 1.5px solid #7dd3fc; font-weight: 800; font-size: 11px; padding: 4px 8px;">
           <span>📲</span> <span class="btn-text">앱 설치</span>
         </button>
 
         <!-- 엄마/아빠 큰 글씨 가독성 토글 버튼 -->
-        <button class="header-btn btn-text-size" id="btnToggleTextSize" onclick="toggleTextSize()" title="글자 크기 변경 (엄마/아빠 가독성 모드)">
+        <button class="header-btn btn-text-size" id="btnToggleTextSize" onclick="toggleTextSize()" title="글자 크기 변경 (엄마/아빠 가독성 모드)" aria-label="글자 크기 전환">
           <span id="textSizeIcon">🔍</span> <span class="btn-text" id="textSizeText">큰글씨</span>
         </button>
 
         <!-- 부모 전용 우리 아이 안심위치 버튼 -->
-        <button class="header-btn btn-safety" id="btnOpenSafetyMap" onclick="openSafetyModal()" title="아이들 안심 위치">
+        <button class="header-btn btn-safety" id="btnOpenSafetyMap" onclick="openSafetyModal()" title="아이들 안심 위치" aria-label="우리 아이 안심 위치 보기">
           <span>🛡️</span> <span class="btn-text">아이위치</span>
         </button>
 
         <!-- 가족톡 버튼 -->
-        <button class="header-btn btn-chat" id="btnOpenChat" onclick="openChatDrawer()" title="가족 채팅방">
+        <button class="header-btn btn-chat" id="btnOpenChat" onclick="openChatDrawer()" title="가족 채팅방" aria-label="가족 채팅방 열기">
           <span>💬</span> <span class="badge-dot" id="chatUnreadDot"></span>
         </button>
 
         <!-- KST 시계 -->
-        <div class="kst-pill" id="kstClock">--:-- KST</div>
+        <div class="kst-pill" id="kstClock" aria-label="현재 한국 시각">--:-- KST</div>
       </div>
     </header>
 
+    <main role="main">
     <!-- 2. 위치 안내 및 자녀 GPS 안심 브리핑 바 -->
     <div class="location-bar">
       <div class="loc-badge">
@@ -268,6 +269,7 @@
         </div>
       </div>
     </section>
+    </main>
 
   </div>
 
@@ -895,6 +897,7 @@
     <span class="zoom-reset-btn" title="기본 크기로 복귀">✕ 리셋</span>
   </div>
 
-  <script src="/static/app.js?v=1.6.0"></script>
+  <script src="/static/js/core.js?v=1.7.0"></script>
+  <script src="/static/app.js?v=1.7.0"></script>
 </body>
 </html>

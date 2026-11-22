@@ -1,75 +1,8 @@
 /**
  * 우리가족챙기기 (Family Care) - 메인 프론트엔드 엔진
  * 기능: 날씨 상세 타임라인, 카카오 지도 연동, 4인 가족 인증(하루퀴즈 연동), 실시간 아이 안심위치, 가족 전용 채팅방
+ * (보안/KST/거리계산/Fetch 인터셉터/접근성 코어는 /static/js/core.js에서 사전 로드됨)
  */
-
-// [Phase 2 보안] HTML 특수문자 이스케이프 (Stored XSS 원천 차단)
-function escapeHtml(val) {
-  if (val === null || val === undefined) return "";
-  return String(val)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-window.escapeHtml = escapeHtml;
-
-// [Phase 2 보안] 비로그인 상태 보호 기능 접근 가드 (임의 계정 사칭 방지)
-function requireFamilyLogin(actionLabel = "이 기능") {
-  if (AppState.currentUser && AppState.token) return true;
-  if (typeof showToast === "function") {
-    showToast(`🔐 ${actionLabel}은(는) 가족 로그인 후 이용할 수 있습니다.`, "info");
-  }
-  if (typeof openLoginModal === "function") {
-    openLoginModal();
-  }
-  return false;
-}
-window.requireFamilyLogin = requireFamilyLogin;
-
-// [Phase 2 보안 & 제9조 영구 세션 보호] 전역 /api/* Authorization 자동 주입 + 명시적 401만 세션 파기
-(function installAuthFetchInterceptor() {
-  const nativeFetch = window.fetch.bind(window);
-  window.fetch = async function (input, init = {}) {
-    const url = typeof input === "string" ? input : (input && input.url ? input.url : "");
-    const isSameOriginApi = url.startsWith("/api/") || url.startsWith(window.location.origin + "/api/");
-    const nextInit = Object.assign({}, init);
-
-    if (isSameOriginApi) {
-      const token = (typeof AppState !== "undefined" && AppState.token) || localStorage.getItem("fc_token");
-      if (token) {
-        const headers = new Headers(nextInit.headers || (input instanceof Request ? input.headers : undefined));
-        if (!headers.has("Authorization")) {
-          headers.set("Authorization", `Bearer ${token}`);
-        }
-        nextInit.headers = headers;
-      }
-    }
-
-    const res = await nativeFetch(input, nextInit);
-
-    // 제9조 준수: 오직 서버로부터 명시적인 401 Unauthorized 수신 시에만 만료 토큰 정리 (오프라인/5xx는 세션 유지)
-    if (
-      isSameOriginApi &&
-      res.status === 401 &&
-      !url.includes("/api/auth/login") &&
-      !url.includes("/api/auth/me") &&
-      typeof AppState !== "undefined" &&
-      AppState.token
-    ) {
-      localStorage.removeItem("fc_token");
-      localStorage.removeItem("fc_user");
-      AppState.token = null;
-      AppState.currentUser = null;
-      if (typeof updateHeaderUserUI === "function") updateHeaderUserUI();
-      if (typeof showToast === "function") {
-        showToast("🔐 로그인 세션이 만료되었습니다. 다시 로그인해주세요.", "info");
-      }
-    }
-    return res;
-  };
-})();
 
 // PWA beforeinstallprompt 전역 최우선 캡처 (브라우저 최초 파이어링 누락 방지)
 window.deferredPwaPrompt = null;
@@ -188,6 +121,12 @@ async function autoDetectUserLocation() {
     async (pos) => {
       const lat = pos.coords.latitude;
       const lon = pos.coords.longitude;
+      const prevLat = AppState.location.lat;
+      const prevLon = AppState.location.lon;
+      const movedMeters = typeof calcHaversineMeters === "function"
+        ? calcHaversineMeters(prevLat, prevLon, lat, lon)
+        : 999;
+
       AppState.location.lat = lat;
       AppState.location.lon = lon;
 
@@ -206,13 +145,16 @@ async function autoDetectUserLocation() {
         }
       } catch (e) {}
 
-      // 실시간 날씨 데이터 즉시 재조회 및 화면 갱신
-      try {
-        const res = await fetch(`/api/weather?lat=${lat}&lon=${lon}&_t=${Date.now()}`);
-        const wData = await res.json();
-        AppState.weatherData = wData;
-        renderWeatherSummary(wData);
-      } catch (e) {}
+      // 기존 거점과 150m 이상 달라진 경우에만 날씨/즐겨찾기 재조회 (초기 3중 중복 호출 차단)
+      if (movedMeters >= 150 || !AppState.weatherData) {
+        try {
+          const res = await fetch(`/api/weather?lat=${lat}&lon=${lon}&_t=${Date.now()}`);
+          const wData = await res.json();
+          AppState.weatherData = wData;
+          renderWeatherSummary(wData);
+        } catch (e) {}
+        loadFavorites();
+      }
 
       // 자녀 계정(도비사랑녀, 미니미니채) 로그인 중일 경우 실시간 GPS 즉각 보고
       if (AppState.currentUser && (AppState.currentUser.role_type === "CHILD" || AppState.currentUser.username === "도비사랑녀" || AppState.currentUser.username === "미니미니채")) {
@@ -232,9 +174,7 @@ async function autoDetectUserLocation() {
         }).catch(() => {});
       }
 
-      // 즐겨찾기 갱신
-      loadFavorites();
-      console.log(`[Auto Location] 내 위치 자동 반영 완료: (${lat}, ${lon})`);
+      console.log(`[Auto Location] 내 위치 자동 반영 완료: (${lat}, ${lon}, 이동=${movedMeters}m)`);
     },
     (err) => {
       console.log("[Auto Location] GPS 권한 미허용/타임아웃. 기본 거점(평내유진마젤란) 유지");
@@ -521,12 +461,21 @@ async function initApp() {
   }
 }
 
-async function refreshData() {
-  await Promise.all([
+async function refreshData(force = false) {
+  const now = Date.now();
+  if (AppState._refreshInFlight) return AppState._refreshInFlight;
+  if (!force && AppState._lastRefreshTime && (now - AppState._lastRefreshTime < 5000)) {
+    return;
+  }
+  AppState._lastRefreshTime = now;
+  AppState._refreshInFlight = Promise.all([
     loadWeather(),
     loadFavorites(),
     checkChildSafetySummary()
-  ]);
+  ]).finally(() => {
+    AppState._refreshInFlight = null;
+  });
+  return AppState._refreshInFlight;
 }
 
 // ============================================================
@@ -980,7 +929,9 @@ window.focusFavoritePlaceById = focusFavoritePlaceById;
 async function loadFavorites() {
   const container = document.getElementById("favoritesQuickList");
   if (!container) return;
+  if (AppState._favoritesInFlight) return AppState._favoritesInFlight;
 
+  AppState._favoritesInFlight = (async () => {
   try {
     const curUser = AppState.currentUser ? AppState.currentUser.username : "";
     const userParam = curUser ? `username=${encodeURIComponent(curUser)}` : "";
@@ -1115,7 +1066,11 @@ async function loadFavorites() {
     `;
   } catch (e) {
     console.error("Favorites load error:", e);
+  } finally {
+    AppState._favoritesInFlight = null;
   }
+  })();
+  return AppState._favoritesInFlight;
 }
 
 // ==========================================
@@ -3076,7 +3031,7 @@ function renderHospitalDetailContent(el, currentFilter = "ALL", searchQuery = ""
 function executeHospitalSearch() {
   const inp = document.getElementById("inputSearchHospitalQuery");
   const q = inp ? inp.value.trim() : "";
-  const contentEl = document.getElementById("categoryDetailContent") || document.getElementById("sheetContent");
+  const contentEl = document.getElementById("sheetContent");
   if (contentEl) {
     renderHospitalDetailContent(contentEl, AppState.currentHospitalFilter || "ALL", q);
   }
@@ -3120,7 +3075,7 @@ function quickAddFavoriteRestaurantById(idx) {
 window.quickAddFavoriteRestaurantById = quickAddFavoriteRestaurantById;
 
 async function filterHospitalList(filterType) {
-  const contentEl = document.getElementById("categoryDetailContent") || document.getElementById("sheetContent");
+  const contentEl = document.getElementById("sheetContent");
   if (!contentEl) return;
   try {
     const res = await fetch(`/api/hospital?filter_type=${filterType}`);
@@ -4434,7 +4389,7 @@ async function submitFamilyLogin() {
         startChildLocationTracker();
       }
       await loadFavorites();
-      refreshData();
+      refreshData(true);
     } else {
       alert(d.message || "비밀번호가 일치하지 않습니다.");
     }
@@ -4459,7 +4414,7 @@ async function logoutFamily() {
   closeLoginModal();
   showToast("🚪 로그아웃되었습니다. 다른 가족 계정으로 로그인할 수 있습니다.", "info");
   loadFavorites();
-  refreshData();
+  refreshData(true);
 }
 window.logoutFamily = logoutFamily;
 
@@ -4561,7 +4516,7 @@ async function saveTransitRouteDirect(originName, destName, routeNo = "전체노
     loadFavorites();
 
     if (AppState.currentCategory === "transit") {
-      const el = document.getElementById("sheetContent") || document.getElementById("categoryDetailContent");
+      const el = document.getElementById("sheetContent");
       if (el) renderTransitDetail(el);
     }
   } catch (e) {
@@ -4578,7 +4533,7 @@ async function deleteTransitRoute(routeId) {
     showToast("🗑️ 즐겨찾기 구간이 삭제되었습니다.", "info");
     loadFavorites();
     if (AppState.currentCategory === "transit") {
-      const el = document.getElementById("sheetContent") || document.getElementById("categoryDetailContent");
+      const el = document.getElementById("sheetContent");
       if (el) renderTransitDetail(el);
     }
   } catch (e) {
@@ -4721,7 +4676,7 @@ async function saveFavoriteEdit() {
     loadFavorites();
 
     if (AppState.currentCategory === "transit") {
-      const el = document.getElementById("sheetContent") || document.getElementById("categoryDetailContent");
+      const el = document.getElementById("sheetContent");
       if (el) renderTransitDetail(el);
     }
   } catch (e) {
@@ -4831,7 +4786,7 @@ function saveBusAlarmSetting() {
     destination: target.destination || "시내방면",
     stages: stages.sort((a, b) => b - a),
     notifiedStages: [],
-    createdAt: new Date().toISOString()
+    createdAt: typeof getKSTDateTimeString === "function" ? getKSTDateTimeString() : ""
   };
 
   AppState.busAlerts.push(newAlert);
@@ -4842,7 +4797,7 @@ function saveBusAlarmSetting() {
   showToast(`🔔 [${target.route_no}번 버스] ${stages.join("분, ")}분 전 도착 알림이 예약되었습니다!`, "info");
 
   if (AppState.currentCategory === "transit") {
-    const el = document.getElementById("sheetContent") || document.getElementById("categoryDetailContent");
+    const el = document.getElementById("sheetContent");
     if (el) renderTransitDetail(el);
   }
 }
@@ -4853,7 +4808,7 @@ function removeBusAlarm(alertId) {
   showToast("🔕 버스 도착 알림 예약이 해제되었습니다.", "info");
 
   if (AppState.currentCategory === "transit") {
-    const el = document.getElementById("sheetContent") || document.getElementById("categoryDetailContent");
+    const el = document.getElementById("sheetContent");
     if (el) renderTransitDetail(el);
   }
 }

@@ -1,13 +1,30 @@
-import urllib.request
+import asyncio
 import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime
 import zoneinfo
 from backend.config import DATA_GO_KR_API_KEY, TIMEZONE
 from backend.database import get_cached_data, set_cached_data
+from backend.http_client import async_http_get_bytes
 from backend.mock_data import get_simulated_hospitals
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
+
+def _is_open_between(now_hm: str, start_hm: str, end_hm: str) -> bool:
+    """자정 넘김 심야 영업(예: 2200~0200, 0900~2500)을 포함한 정확한 영업시간 판정"""
+    if not start_hm or not end_hm:
+        return False
+    try:
+        n = int(now_hm)
+        s = int(start_hm)
+        e = int(end_hm)
+        if e >= 2400:
+            return n >= s or n <= (e - 2400)
+        if e < s:
+            return n >= s or n <= e
+        return s <= n <= e
+    except Exception:
+        return start_hm <= now_hm <= end_hm
 
 # 평내·호평 주요 병의원 및 약국 실측 좌표 데이터베이스
 HOSPITAL_COORDINATES = {
@@ -64,7 +81,7 @@ def format_time_str(val):
     return f"{val[:2]}:{val[2:]}"
 
 async def get_hospital_pharmacy_info(lat: float, lon: float, filter_type: str = "ALL"):
-    cache_key = f"hospitals_real_{filter_type}"
+    cache_key = f"hospitals_real_v2_{filter_type}_{round(lat, 2)}_{round(lon, 2)}"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
@@ -101,9 +118,27 @@ async def get_hospital_pharmacy_info(lat: float, lon: float, filter_type: str = 
             "pageNo": "1",
             "numOfRows": "10"
         }
-        p_req = urllib.request.Request(f"{pharm_url}?{urllib.parse.urlencode(p_params)}")
-        with urllib.request.urlopen(p_req, timeout=5) as resp:
-            root = ET.fromstring(resp.read())
+        p_full_url = f"{pharm_url}?{urllib.parse.urlencode(p_params)}"
+        hosp_url = "https://apis.data.go.kr/B552657/HsptlAsembySearchService/getHsptlMdcncListInfoInqire"
+        h_params = {
+            "serviceKey": DATA_GO_KR_API_KEY,
+            "Q0": "경기도",
+            "Q1": "남양주시",
+            "QN": "소아",
+            "pageNo": "1",
+            "numOfRows": "10"
+        }
+        h_full_url = f"{hosp_url}?{urllib.parse.urlencode(h_params)}"
+
+        # 약국 + 소아과/병의원 E-Gen API 비블로킹 병렬 동시 호출
+        p_raw, h_raw = await asyncio.gather(
+            async_http_get_bytes(p_full_url, timeout=5.0),
+            async_http_get_bytes(h_full_url, timeout=5.0),
+            return_exceptions=True,
+        )
+
+        if isinstance(p_raw, (bytes, bytearray)):
+            root = ET.fromstring(p_raw)
             for it in root.findall(".//item"):
                 name = it.findtext("dutyName")
                 addr = it.findtext("dutyAddr")
@@ -117,11 +152,8 @@ async def get_hospital_pharmacy_info(lat: float, lon: float, filter_type: str = 
                 sun_c = it.findtext("dutyTime7c")
 
                 has_today = bool(today_s and today_c)
-                is_open_now = False
-                if has_today:
-                    is_open_now = (today_s <= now_hm <= today_c)
+                is_open_now = _is_open_between(now_hm, today_s, today_c) if has_today else False
 
-                # 주말 운영 안내 문구
                 weekend_txt = []
                 if sat_s and sat_c:
                     weekend_txt.append(f"토 {format_time_str(sat_s)}~{format_time_str(sat_c)}")
@@ -154,24 +186,12 @@ async def get_hospital_pharmacy_info(lat: float, lon: float, filter_type: str = 
                     "longitude": p_lon
                 })
 
-        # 2. 소아과 및 병의원 조회 (평내/호평 인근)
-        hosp_url = "https://apis.data.go.kr/B552657/HsptlAsembySearchService/getHsptlMdcncListInfoInqire"
-        h_params = {
-            "serviceKey": DATA_GO_KR_API_KEY,
-            "Q0": "경기도",
-            "Q1": "남양주시",
-            "QN": "소아",
-            "pageNo": "1",
-            "numOfRows": "10"
-        }
-        h_req = urllib.request.Request(f"{hosp_url}?{urllib.parse.urlencode(h_params)}")
-        with urllib.request.urlopen(h_req, timeout=5) as resp:
-            root = ET.fromstring(resp.read())
+        if isinstance(h_raw, (bytes, bytearray)):
+            root = ET.fromstring(h_raw)
             for it in root.findall(".//item"):
                 name = it.findtext("dutyName")
                 addr = it.findtext("dutyAddr")
                 tel = it.findtext("dutyTel1") or "전화번호 없음"
-                div = it.findtext("dutyDivNam") or "의원"
 
                 today_s = it.findtext(f"dutyTime{day_idx}s")
                 today_c = it.findtext(f"dutyTime{day_idx}c")
@@ -181,9 +201,7 @@ async def get_hospital_pharmacy_info(lat: float, lon: float, filter_type: str = 
                 sun_c = it.findtext("dutyTime7c")
 
                 has_today = bool(today_s and today_c)
-                is_open_now = False
-                if has_today:
-                    is_open_now = (today_s <= now_hm <= today_c)
+                is_open_now = _is_open_between(now_hm, today_s, today_c) if has_today else False
 
                 weekend_txt = []
                 if sat_s and sat_c:
@@ -192,7 +210,7 @@ async def get_hospital_pharmacy_info(lat: float, lon: float, filter_type: str = 
                     weekend_txt.append(f"일 {format_time_str(sun_s)}~{format_time_str(sun_c)}")
                 weekend_info = " / ".join(weekend_txt) if weekend_txt else "주말 휴진"
 
-                badge = "달빛어린이병원" if ("달빛" in name or (sun_s and int(sun_c or 0) >= 1800)) else "소아청소년과"
+                badge = "달빛어린이병원" if ("달빛" in (name or "") or (sun_s and int(sun_c or 0) >= 1800)) else "소아청소년과"
                 status_badge = f"🟢 진료중 ({format_time_str(today_c)} 마감)" if is_open_now else ("🔴 진료종료" if has_today else "⚪ 오늘 휴진")
 
                 h_lat, h_lon = resolve_hospital_coords(name, addr, it.findtext("wgs84Lat"), it.findtext("wgs84Lon"), len(items))
@@ -233,7 +251,7 @@ async def get_hospital_pharmacy_info(lat: float, lon: float, filter_type: str = 
             "items": filtered_items
         }
 
-        set_cached_data(cache_key, result, ttl_seconds=1800)
+        set_cached_data(cache_key, result, ttl_seconds=600)
         return result
 
     except Exception as e:

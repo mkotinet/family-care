@@ -1,10 +1,9 @@
-import urllib.request
 import urllib.parse
-import json
 from datetime import datetime
 import zoneinfo
 from backend.config import DATA_GO_KR_API_KEY, KAKAO_REST_API_KEY, TIMEZONE
 from backend.database import get_db_connection, get_cached_data, set_cached_data, delete_cached_data
+from backend.http_client import async_http_get_json
 from backend.mock_data import get_simulated_transit
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
@@ -191,22 +190,24 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
                 "size": 15,
                 "sort": "distance"
             }
-            req = urllib.request.Request(f"{url}?{urllib.parse.urlencode(params)}", headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"})
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                data = json.loads(resp.read().decode())
-                for d in data.get("documents", []):
-                    raw_name = d.get("place_name").replace(" 버스정류장", "").replace(" 정류소", "").strip()
-                    if raw_name not in stops_dict:
-                        stops_dict[raw_name] = {
-                            "id": d.get("id"),
-                            "name": raw_name,
-                            "full_name": d.get("place_name"),
-                            "address": d.get("road_address_name") or d.get("address_name"),
-                            "latitude": float(d.get("y")),
-                            "longitude": float(d.get("x")),
-                            "direction": "hopyeong",
-                            "distance": int(d.get("distance", 0))
-                        }
+            data = await async_http_get_json(
+                f"{url}?{urllib.parse.urlencode(params)}",
+                headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"},
+                timeout=4.0,
+            )
+            for d in data.get("documents", []):
+                raw_name = d.get("place_name").replace(" 버스정류장", "").replace(" 정류소", "").strip()
+                if raw_name not in stops_dict:
+                    stops_dict[raw_name] = {
+                        "id": d.get("id"),
+                        "name": raw_name,
+                        "full_name": d.get("place_name"),
+                        "address": d.get("road_address_name") or d.get("address_name"),
+                        "latitude": float(d.get("y")),
+                        "longitude": float(d.get("x")),
+                        "direction": "hopyeong",
+                        "distance": int(d.get("distance", 0))
+                    }
         except Exception:
             pass
 
@@ -272,7 +273,7 @@ async def get_transit_routes(username: str = None):
         # TAGO 버스 실시간 API 조회
         if DATA_GO_KR_API_KEY and r_type == "BUS":
             try:
-                url = "http://apis.data.go.kr/1613000/ArvlInfoInqireService/getSttnAcctoArvlPrearngeInfoList"
+                url = "https://apis.data.go.kr/1613000/ArvlInfoInqireService/getSttnAcctoArvlPrearngeInfoList"
                 params = {
                     "serviceKey": DATA_GO_KR_API_KEY,
                     "cityCode": "31130",  # 남양주시
@@ -281,27 +282,25 @@ async def get_transit_routes(username: str = None):
                     "pageNo": "1",
                     "_type": "json"
                 }
-                req = urllib.request.Request(f"{url}?{urllib.parse.urlencode(params)}")
-                with urllib.request.urlopen(req, timeout=4) as resp:
-                    data = json.loads(resp.read().decode('utf-8'))
-                    items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-                    if isinstance(items, dict):
-                        items = [items]
+                data = await async_http_get_json(f"{url}?{urllib.parse.urlencode(params)}", timeout=4.0)
+                items = data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+                if isinstance(items, dict):
+                    items = [items]
 
-                    matched = None
-                    for it in items:
-                        if str(it.get("routeno")) == route_no or route_no in str(it.get("routeno")):
-                            matched = it
-                            break
+                matched = None
+                for it in items:
+                    if str(it.get("routeno")) == route_no or route_no in str(it.get("routeno")):
+                        matched = it
+                        break
 
-                    if matched:
-                        sec = int(matched.get("arrtime", 0))
-                        mins = max(1, sec // 60)
-                        cnt = matched.get("arrprevstationcnt", 1)
-                        v_type = matched.get("vehicletp", "일반")
-                        remain_time = f"{mins}분 후 도착"
-                        remain_stops = f"{cnt}정거장 전 ({v_type})"
-                        badge_color = "#10b981" if mins <= 5 else "#3b82f6"
+                if matched:
+                    sec = int(matched.get("arrtime", 0))
+                    mins = max(1, sec // 60)
+                    cnt = matched.get("arrprevstationcnt", 1)
+                    v_type = matched.get("vehicletp", "일반")
+                    remain_time = f"{mins}분 후 도착"
+                    remain_stops = f"{cnt}정거장 전 ({v_type})"
+                    badge_color = "#10b981" if mins <= 5 else "#3b82f6"
             except Exception:
                 pass
 

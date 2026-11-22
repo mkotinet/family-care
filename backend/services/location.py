@@ -1,11 +1,9 @@
-import urllib.request
-import urllib.parse
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
 import zoneinfo
 from backend.config import KAKAO_REST_API_KEY, TIMEZONE, DEFAULT_LOCATION
 from backend.database import get_db_connection
 from backend.coords import haversine_distance
+from backend.http_client import async_http_get_json
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
@@ -44,18 +42,16 @@ async def update_user_location(username: str, lat: float, lon: float, accuracy: 
     landmark = custom_landmark or determine_landmark(lat, lon)
     address = "경기도 남양주시 평내동"
 
-    # 카카오 좌표계 변환 및 상세 주소 조회
+    # 카카오 좌표계 변환 및 상세 주소 조회 (비블로킹)
     if KAKAO_REST_API_KEY and lat is not None and lon is not None:
         try:
             url = f"https://dapi.kakao.com/v2/local/geo/coord2address.json?x={lon}&y={lat}"
-            req = urllib.request.Request(url, headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"})
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                res_data = json.loads(resp.read().decode())
-                docs = res_data.get("documents", [])
-                if docs:
-                    road = docs[0].get("road_address")
-                    jibun = docs[0].get("address")
-                    address = (road.get("address_name") if road else (jibun.get("address_name") if jibun else address))
+            res_data = await async_http_get_json(url, headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}, timeout=3.0)
+            docs = res_data.get("documents", [])
+            if docs:
+                road = docs[0].get("road_address")
+                jibun = docs[0].get("address")
+                address = (road.get("address_name") if road else (jibun.get("address_name") if jibun else address))
         except Exception:
             pass
 

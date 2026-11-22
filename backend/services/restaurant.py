@@ -1,12 +1,22 @@
-import urllib.request
 import urllib.parse
-import json
 from datetime import datetime
 import zoneinfo
 from backend.config import KAKAO_REST_API_KEY, TIMEZONE
 from backend.database import get_db_connection, get_cached_data, set_cached_data
+from backend.http_client import async_http_get_json
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
+
+def _dynamic_restaurant_status(now: datetime, is_weekend: bool) -> str:
+    """현재 KST 시각 기반 동적 영업 상태 표출 (새벽/심야 '영업중' 오표기 방지)"""
+    hm = now.hour * 100 + now.minute
+    close_str = "21:00" if is_weekend else "21:30"
+    close_hm = 2100 if is_weekend else 2130
+    if 1100 <= hm <= close_hm:
+        return f"🟢 영업중 ({close_str} 마감 예상)"
+    if hm < 1100:
+        return "🟡 영업 준비중 (11:00 오픈 예상)"
+    return "🔴 영업종료 (전화 확인 권장)"
 
 async def get_favorite_restaurants():
     conn = get_db_connection()
@@ -36,7 +46,7 @@ async def get_favorite_restaurants():
             "family_note": row["family_note"],
             "is_favorite": bool(row["is_favorite"]),
             "is_weekend_open": True,
-            "status_badge": "🟢 오늘 영업중 (주말 21:00 마감)" if is_weekend else "🟢 오늘 영업중 (21:30 마감)"
+            "status_badge": _dynamic_restaurant_status(now, is_weekend)
         })
     return results
 
@@ -115,13 +125,10 @@ async def search_places_kakao(query: str = "맛집", lat: float = 37.643421, lon
             "sort": "distance"
         }
         query_str = urllib.parse.urlencode(params)
-        req = urllib.request.Request(f"{url}?{query_str}", headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"})
-        
         docs = []
         try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                docs = data.get("documents", [])
+            data = await async_http_get_json(f"{url}?{query_str}", headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}, timeout=5.0)
+            docs = data.get("documents", [])
         except Exception:
             docs = []
 
@@ -132,17 +139,16 @@ async def search_places_kakao(query: str = "맛집", lat: float = 37.643421, lon
             params.pop("x", None)
             params.pop("y", None)
             query_str = urllib.parse.urlencode(params)
-            req2 = urllib.request.Request(f"{url}?{query_str}", headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"})
             try:
-                with urllib.request.urlopen(req2, timeout=5) as resp2:
-                    data2 = json.loads(resp2.read().decode('utf-8'))
-                    docs = data2.get("documents", [])
+                data2 = await async_http_get_json(f"{url}?{query_str}", headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}, timeout=5.0)
+                docs = data2.get("documents", [])
             except Exception:
                 pass
 
         places = []
         now = datetime.now(KST)
         is_weekend = now.weekday() >= 5
+        cur_status_badge = _dynamic_restaurant_status(now, is_weekend)
 
         for d in docs:
             d_x = float(d.get("x", lon))
@@ -163,7 +169,7 @@ async def search_places_kakao(query: str = "맛집", lat: float = 37.643421, lon
                 "longitude": d_x,
                 "place_url": d.get("place_url"),
                 "is_weekend_open": True,
-                "status_badge": "🟢 주말 영업" if is_weekend else "🟢 오늘 영업중"
+                "status_badge": cur_status_badge
             })
 
         # 캐시 저장

@@ -1,11 +1,11 @@
-import urllib.request
+import asyncio
 import urllib.parse
-import json
 from datetime import datetime, timedelta
 import zoneinfo
 from backend.config import DATA_GO_KR_API_KEY, TIMEZONE
 from backend.coords import wgs84_to_kma_grid
 from backend.database import get_cached_data, set_cached_data
+from backend.http_client import async_http_get_json
 from backend.mock_data import get_simulated_weather
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
@@ -97,32 +97,7 @@ async def get_weather_data(lat: float, lon: float):
             "nx": str(grid_x),
             "ny": str(grid_y)
         }
-        ncst_req = urllib.request.Request(f"{ncst_url}?{urllib.parse.urlencode(ncst_params)}")
-        with urllib.request.urlopen(ncst_req, timeout=4) as resp:
-            res = json.loads(resp.read().decode('utf-8'))
-            items = res.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-            pty_val = 0
-            for it in items:
-                cat = it.get("category")
-                val = it.get("obsrValue")
-                if cat == "T1H" and val:
-                    weather_data["temp"] = round(float(val), 1)
-                    weather_data["feels_like"] = round(float(val) - 0.7, 1)
-                elif cat == "REH" and val:
-                    weather_data["humidity"] = int(float(val))
-                elif cat == "PTY" and val:
-                    pty_val = int(val)
-
-            if pty_val in [1, 5]:
-                weather_data["weather_desc"] = "비"
-                weather_data["weather_icon"] = "🌧️"
-                weather_data["umbrella_needed"] = True
-                weather_data["umbrella_msg"] = "현재 비가 내리고 있어요! 우산을 꼭 챙기세요 ☂️"
-            elif pty_val in [2, 3, 6, 7]:
-                weather_data["weather_desc"] = "눈"
-                weather_data["weather_icon"] = "❄️"
-                weather_data["umbrella_needed"] = True
-                weather_data["umbrella_msg"] = "현재 눈이 내리고 있어요! 우산을 꼭 챙기세요 ☂️"
+        ncst_full_url = f"{ncst_url}?{urllib.parse.urlencode(ncst_params)}"
 
         # 2. 기상청 단기예보 (getVilageFcst) -> 매 3시간 +10분 발표 (15분 여유 마진으로 정각~09분 경계 에러 차단)
         fcst_ref = now - timedelta(minutes=15)
@@ -147,13 +122,59 @@ async def get_weather_data(lat: float, lon: float):
             "nx": str(grid_x),
             "ny": str(grid_y)
         }
-        fcst_req = urllib.request.Request(f"{fcst_url}?{urllib.parse.urlencode(fcst_params)}")
-        with urllib.request.urlopen(fcst_req, timeout=5) as resp:
-            res = json.loads(resp.read().decode('utf-8'))
-            items = res.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+        fcst_full_url = f"{fcst_url}?{urllib.parse.urlencode(fcst_params)}"
 
-            # 날짜/시간별 그룹화
-            slot_map = {}
+        # 3. 에어코리아 대기오염정보
+        air_url = "https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty"
+        air_params = {
+            "serviceKey": DATA_GO_KR_API_KEY,
+            "returnType": "json",
+            "numOfRows": "40",
+            "pageNo": "1",
+            "sidoName": "경기",
+            "ver": "1.0"
+        }
+        air_full_url = f"{air_url}?{urllib.parse.urlencode(air_params)}"
+
+        # 3개 공공 API 비블로킹 병렬 동시 호출 (순차 최대 13초 -> 병렬 최대 5초)
+        ncst_res, fcst_res, air_res = await asyncio.gather(
+            async_http_get_json(ncst_full_url, timeout=4.0),
+            async_http_get_json(fcst_full_url, timeout=5.0),
+            async_http_get_json(air_full_url, timeout=4.0),
+            return_exceptions=True,
+        )
+
+        # 1) 초단기실황 파싱
+        pty_val = 0
+        if isinstance(ncst_res, dict):
+            items = ncst_res.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+            for it in items:
+                cat = it.get("category")
+                val = it.get("obsrValue")
+                if cat == "T1H" and val:
+                    weather_data["temp"] = round(float(val), 1)
+                    weather_data["feels_like"] = round(float(val) - 0.7, 1)
+                elif cat == "REH" and val:
+                    weather_data["humidity"] = int(float(val))
+                elif cat == "PTY" and val:
+                    pty_val = int(val)
+
+            if pty_val in [1, 5]:
+                weather_data["weather_desc"] = "비"
+                weather_data["weather_icon"] = "🌧️"
+                weather_data["umbrella_needed"] = True
+                weather_data["umbrella_msg"] = "현재 비가 내리고 있어요! 우산을 꼭 챙기세요 ☂️"
+            elif pty_val in [2, 3, 6, 7]:
+                weather_data["weather_desc"] = "눈"
+                weather_data["weather_icon"] = "❄️"
+                weather_data["umbrella_needed"] = True
+                weather_data["umbrella_msg"] = "현재 눈이 내리고 있어요! 우산을 꼭 챙기세요 ☂️"
+
+        # 2) 단기예보 파싱
+        slot_map = {}
+        sorted_keys = []
+        if isinstance(fcst_res, dict):
+            items = fcst_res.get("response", {}).get("body", {}).get("items", {}).get("item", [])
             for it in items:
                 dt_key = f"{it['fcstDate']}_{it['fcstTime']}"
                 if dt_key not in slot_map:
@@ -215,7 +236,6 @@ async def get_weather_data(lat: float, lon: float):
                 d_str = target_d.strftime("%Y%m%d")
                 day_name = days_korean[target_d.weekday()]
 
-                # 해당 일자의 최저/최고 기온 및 대표 날씨 산출
                 temps = [float(slot_map[k]["TMP"]) for k in slot_map if k.startswith(d_str) and "TMP" in slot_map[k]]
                 pops = [int(slot_map[k]["POP"]) for k in slot_map if k.startswith(d_str) and "POP" in slot_map[k]]
 
@@ -238,19 +258,8 @@ async def get_weather_data(lat: float, lon: float):
                     "rain_prob": max_pop
                 })
 
-        # 3. 에어코리아 대기오염정보
-        air_url = "https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty"
-        air_params = {
-            "serviceKey": DATA_GO_KR_API_KEY,
-            "returnType": "json",
-            "numOfRows": "40",
-            "pageNo": "1",
-            "sidoName": "경기",
-            "ver": "1.0"
-        }
-        air_req = urllib.request.Request(f"{air_url}?{urllib.parse.urlencode(air_params)}")
-        with urllib.request.urlopen(air_req, timeout=4) as resp:
-            air_res = json.loads(resp.read().decode('utf-8'))
+        # 3) 에어코리아 파싱
+        if isinstance(air_res, dict):
             air_items = air_res.get("response", {}).get("body", {}).get("items", [])
             target_station = None
             for item in air_items:

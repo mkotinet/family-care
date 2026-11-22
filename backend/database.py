@@ -8,11 +8,22 @@ from backend.config import DB_PATH, TIMEZONE
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
+_WAL_INITIALIZED = False
+
 def get_db_connection():
+    global _WAL_INITIALIZED
     db_file = Path(DB_PATH)
     db_file.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 15000")
+    if not _WAL_INITIALIZED:
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
+            _WAL_INITIALIZED = True
+        except Exception:
+            pass
     return conn
 
 # 4대 공식 가족 회원 정보 (하루퀴즈 연동, 다른 아이디 제외)
@@ -277,6 +288,7 @@ def set_cached_data(cache_key: str, data: dict, ttl_seconds: int = 300):
     conn = get_db_connection()
     cursor = conn.cursor()
     now_kst = datetime.now(KST)
+    now_iso = now_kst.isoformat()
     expires_at = (now_kst + timedelta(seconds=ttl_seconds)).isoformat()
     data_json = json.dumps(data, ensure_ascii=False)
     cursor.execute("""
@@ -284,6 +296,8 @@ def set_cached_data(cache_key: str, data: dict, ttl_seconds: int = 300):
     VALUES (?, ?, ?)
     ON CONFLICT(cache_key) DO UPDATE SET data_json = excluded.data_json, expires_at = excluded.expires_at
     """, (cache_key, data_json, expires_at))
+    # 만료 캐시 자동 정리 (api_cache 무한 팽창 방지)
+    cursor.execute("DELETE FROM api_cache WHERE expires_at <= ?", (now_iso,))
 
     conn.commit()
     conn.close()

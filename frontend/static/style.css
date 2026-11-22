@@ -613,17 +613,30 @@ body {
 .detail-sheet {
   width: 100%;
   max-width: 520px;
-  max-height: 92vh;
-  max-height: 92dvh;
+  height: 65vh;
+  height: 65dvh;
+  max-height: 65vh;
+  max-height: 65dvh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   background: #ffffff;
   border-radius: 24px 24px 0 0;
-  padding: 16px 20px calc(24px + env(safe-area-inset-bottom, 16px));
-  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.15);
+  padding: 12px 20px calc(24px + env(safe-area-inset-bottom, 16px));
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.18);
   display: flex;
   flex-direction: column;
   animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: height 0.3s cubic-bezier(0.16, 1, 0.3, 1), max-height 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.25s ease;
+  position: relative;
+}
+
+/* 위로 올렸을 때 전체 크기(풀스크린) 모드 */
+.detail-sheet.expanded {
+  height: 96vh;
+  height: 96dvh;
+  max-height: 96vh;
+  max-height: 96dvh;
+  border-radius: 18px 18px 0 0;
 }
 
 @keyframes slideUp {
@@ -631,39 +644,67 @@ body {
   to { transform: translateY(0); }
 }
 
+.sheet-handle-area {
+  width: 100%;
+  padding: 2px 0 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  touch-action: pan-y;
+  user-select: none;
+}
+
 .sheet-handle-bar {
   width: 44px;
   height: 5px;
   background: #cbd5e1;
   border-radius: 3px;
-  margin: 0 auto 12px;
+  transition: background 0.2s, width 0.2s;
 }
 
-.sheet-header {
+.sheet-handle-area:hover .sheet-handle-bar,
+.sheet-handle-area:active .sheet-handle-bar {
+  background: #94a3b8;
+  width: 52px;
+}
+
+.sheet-expand-hint {
+  font-size: 10px;
+  color: #94a3b8;
+  font-weight: 700;
+  margin-top: 3px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #f1f5f9;
-  margin-bottom: 12px;
-}
-
-.sheet-title {
-  font-size: 17px;
-  font-weight: 900;
-  color: #0f172a;
-}
-
-.sheet-subtitle {
-  font-size: 11px;
-  color: #64748b;
-  margin-top: 2px;
+  gap: 3px;
+  letter-spacing: -0.2px;
 }
 
 .sheet-header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+}
+
+.sheet-expand-btn {
+  background: #f1f5f9;
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sheet-expand-btn:hover,
+.sheet-expand-btn:active {
+  background: #e2e8f0;
+  color: #0f172a;
 }
 
 .view-toggle-pills {
@@ -1769,6 +1810,155 @@ body {
   background: #0284c7;
   color: white;
   box-shadow: 0 2px 6px rgba(2, 132, 199, 0.3);
+}
+
+/* ==========================================
+ * 8. 큰 글씨 가독성 모드 (엄마/아빠 맞춤형 고대비 UI)
+ * ========================================== */
+.btn-text-size {
+  background: #f8fafc;
+  color: #334155;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  transition: all 0.2s ease;
+}
+
+.btn-text-size:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.btn-text-size.active {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fb923c;
+  box-shadow: 0 2px 8px rgba(251, 146, 60, 0.25);
+}
+
+/* 큰 글씨 모드 적용 시 메인 & 모달 전반의 타이포그래피 스케일업 */
+body.large-text-mode {
+  font-size: 16px;
+}
+
+body.large-text-mode .fav-card {
+  padding: 15px 16px !important;
+  min-width: 175px !important;
+  border-width: 2px !important;
+}
+
+body.large-text-mode .fav-card-tag {
+  font-size: 13px !important;
+  font-weight: 900 !important;
+  padding: 4px 9px !important;
+  letter-spacing: -0.2px !important;
+}
+
+body.large-text-mode .fav-card-title {
+  font-size: 17px !important;
+  font-weight: 900 !important;
+  color: #0f172a !important;
+  line-height: 1.35 !important;
+  margin-top: 4px !important;
+}
+
+body.large-text-mode .fav-card-sub {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #334155 !important;
+  margin-top: 3px !important;
+}
+
+body.large-text-mode .fav-card-highlight {
+  font-size: 16px !important;
+  font-weight: 900 !important;
+  margin-top: 6px !important;
+  letter-spacing: -0.3px !important;
+}
+
+body.large-text-mode .item-card {
+  padding: 14px 16px !important;
+  border-width: 1.5px !important;
+}
+
+body.large-text-mode .item-name {
+  font-size: 17px !important;
+  font-weight: 900 !important;
+  color: #0f172a !important;
+}
+
+body.large-text-mode .item-desc {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #334155 !important;
+  line-height: 1.45 !important;
+}
+
+body.large-text-mode .item-badge {
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  padding: 4px 8px !important;
+}
+
+body.large-text-mode .weather-temp-main {
+  font-size: 38px !important;
+  font-weight: 900 !important;
+}
+
+body.large-text-mode .weather-temp-sub {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+body.large-text-mode .weather-badge-group .badge {
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  padding: 6px 12px !important;
+}
+
+body.large-text-mode .outfit-card {
+  font-size: 15px !important;
+  line-height: 1.55 !important;
+  font-weight: 700 !important;
+}
+
+body.large-text-mode .category-card-title {
+  font-size: 16px !important;
+  font-weight: 900 !important;
+}
+
+body.large-text-mode .category-card-sub {
+  font-size: 12px !important;
+  font-weight: 600 !important;
+}
+
+body.large-text-mode .sheet-title {
+  font-size: 19px !important;
+  font-weight: 900 !important;
+}
+
+body.large-text-mode .sheet-subtitle {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+body.large-text-mode .modal-title {
+  font-size: 18px !important;
+  font-weight: 900 !important;
+}
+
+body.large-text-mode .btn-card-action,
+body.large-text-mode .btn-primary,
+body.large-text-mode .btn-secondary {
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  min-height: 38px !important;
 }
 
 

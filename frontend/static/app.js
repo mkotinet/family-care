@@ -367,7 +367,56 @@ function updateHeaderUserUI() {
     if (safetyBtn) safetyBtn.style.display = "none";
     if (safetyBanner) safetyBanner.style.display = "none";
   }
+
+  // 사용자 역할(엄마/아빠 vs 자녀)에 맞춘 가독성 글자 크기 선제 적용
+  applyUserTextSizePreference(u);
 }
+
+// ==========================================
+// 엄마/아빠 큰 글씨 가독성 모드 관리
+// ==========================================
+function applyUserTextSizePreference(user) {
+  const isParent = user && (user.role_type === "PARENT" || user.username === "미니미니" || user.username === "Ljh" || (user.role_title && (user.role_title.includes("아빠") || user.role_title.includes("엄마"))));
+  
+  const savedPref = localStorage.getItem("fc_text_size");
+  if (savedPref !== null) {
+    setTextSizeMode(savedPref === "large", false);
+  } else {
+    // 저장된 설정이 없을 때: 아빠/엄마는 기본이 '큰 글씨' ON! (사용자 요구사항 필수 반영)
+    setTextSizeMode(Boolean(isParent), false);
+  }
+}
+
+function setTextSizeMode(isLarge, notify = false) {
+  const body = document.body;
+  const btn = document.getElementById("btnToggleTextSize");
+  const iconEl = document.getElementById("textSizeIcon");
+  const textEl = document.getElementById("textSizeText");
+
+  if (isLarge) {
+    body.classList.add("large-text-mode");
+    if (btn) btn.classList.add("active");
+    if (iconEl) iconEl.textContent = "🔍";
+    if (textEl) textEl.textContent = "보통글씨";
+    localStorage.setItem("fc_text_size", "large");
+    if (notify) showToastNotice("🔍 큰 글씨 가독성 모드가 켜졌습니다. (엄마/아빠 맞춤)");
+  } else {
+    body.classList.remove("large-text-mode");
+    if (btn) btn.classList.remove("active");
+    if (iconEl) iconEl.textContent = "🔍";
+    if (textEl) textEl.textContent = "큰글씨";
+    localStorage.setItem("fc_text_size", "normal");
+    if (notify) showToastNotice("🔍 보통 글씨 모드로 전환되었습니다.");
+  }
+}
+
+function toggleTextSize() {
+  const isCurrentlyLarge = document.body.classList.contains("large-text-mode");
+  setTextSizeMode(!isCurrentlyLarge, true);
+}
+window.toggleTextSize = toggleTextSize;
+window.setTextSizeMode = setTextSizeMode;
+window.applyUserTextSizePreference = applyUserTextSizePreference;
 
 // 메인 앱 초기화
 async function initApp() {
@@ -393,6 +442,9 @@ async function initApp() {
       loadFavorites(),
       checkChildSafetySummary()
     ]);
+
+    // 바텀 시트 스와이프/드래그 제스처 바인딩
+    initSheetGestures();
   } catch (e) {
     console.error("App init error:", e);
   }
@@ -974,7 +1026,117 @@ async function loadFavorites() {
 }
 
 // ==========================================
-// 4. 카테고리 상세 바텀 시트 & 카카오맵 연동
+// 4. 바텀 시트 확장(전체화면) & 스와이프 제스처 인터랙션
+// ==========================================
+function expandSheet() {
+  const sheet = document.getElementById("sheetContainer");
+  const hint = document.getElementById("sheetExpandHint");
+  const btn = document.getElementById("btnSheetExpand");
+  if (!sheet) return;
+
+  sheet.classList.add("expanded");
+  if (hint) hint.textContent = "▼ 아래로 내려서 줄이기";
+  if (btn) {
+    btn.textContent = "🗗";
+    btn.title = "원래 크기로 축소";
+  }
+  if (AppState.kakaoCategoryMap) {
+    setTimeout(() => AppState.kakaoCategoryMap.relayout(), 150);
+  }
+  if (AppState.leafletCategoryMap) {
+    setTimeout(() => AppState.leafletCategoryMap.invalidateSize(), 150);
+  }
+}
+
+function collapseSheet() {
+  const sheet = document.getElementById("sheetContainer");
+  const hint = document.getElementById("sheetExpandHint");
+  const btn = document.getElementById("btnSheetExpand");
+  if (!sheet) return;
+
+  sheet.classList.remove("expanded");
+  if (hint) hint.textContent = "▲ 위로 올려서 전체화면";
+  if (btn) {
+    btn.textContent = "⛶";
+    btn.title = "전체화면으로 확장";
+  }
+  if (AppState.kakaoCategoryMap) {
+    setTimeout(() => AppState.kakaoCategoryMap.relayout(), 150);
+  }
+  if (AppState.leafletCategoryMap) {
+    setTimeout(() => AppState.leafletCategoryMap.invalidateSize(), 150);
+  }
+}
+
+function toggleSheetExpand() {
+  const sheet = document.getElementById("sheetContainer");
+  if (!sheet) return;
+  if (sheet.classList.contains("expanded")) {
+    collapseSheet();
+  } else {
+    expandSheet();
+  }
+}
+window.expandSheet = expandSheet;
+window.collapseSheet = collapseSheet;
+window.toggleSheetExpand = toggleSheetExpand;
+
+function initSheetGestures() {
+  const sheet = document.getElementById("sheetContainer");
+  const handle = document.getElementById("sheetHandleArea");
+  if (!sheet) return;
+
+  let startY = 0;
+  let currentY = 0;
+  let isDragging = false;
+
+  function onTouchStart(e) {
+    if (!e.touches || e.touches.length === 0) return;
+    startY = e.touches[0].clientY;
+    currentY = startY;
+    isDragging = true;
+  }
+
+  function onTouchMove(e) {
+    if (!isDragging || !e.touches || e.touches.length === 0) return;
+    currentY = e.touches[0].clientY;
+  }
+
+  function onTouchEnd(e) {
+    if (!isDragging) return;
+    isDragging = false;
+    const deltaY = currentY - startY;
+
+    // 위로 35px 이상 쓸어올림 -> 전체 크기로 확장!
+    if (deltaY < -35) {
+      expandSheet();
+    }
+    // 아래로 45px 이상 쓸어내림
+    else if (deltaY > 45) {
+      if (sheet.classList.contains("expanded")) {
+        collapseSheet();
+      } else {
+        closeCategoryDetail();
+      }
+    }
+  }
+
+  if (handle) {
+    handle.addEventListener("touchstart", onTouchStart, { passive: true });
+    handle.addEventListener("touchmove", onTouchMove, { passive: true });
+    handle.addEventListener("touchend", onTouchEnd, { passive: true });
+  }
+
+  const header = sheet.querySelector(".sheet-header");
+  if (header) {
+    header.addEventListener("touchstart", onTouchStart, { passive: true });
+    header.addEventListener("touchmove", onTouchMove, { passive: true });
+    header.addEventListener("touchend", onTouchEnd, { passive: true });
+  }
+}
+
+// ==========================================
+// 4-1. 카테고리 상세 바텀 시트 & 카카오맵 연동
 // ==========================================
 async function openCategoryDetail(cat) {
   // 카테고리 전환 시 이전 상태 및 지도 찌꺼기(출발/도착 깃발, 경로선, 바텀 카드 등) 완전 초기화
@@ -982,6 +1144,7 @@ async function openCategoryDetail(cat) {
   clearCategoryMarkers();
   clearCategoryRouteLine();
   closeSelectedPlaceCard();
+  collapseSheet(); // 열릴 때 기본 크기(중간 크기)로 정돈
   if (AppState.customTransitPin) {
     if (AppState.customTransitPin.setMap) AppState.customTransitPin.setMap(null);
     if (AppState.customTransitPin.remove) AppState.customTransitPin.remove();
@@ -1045,6 +1208,7 @@ function closeCategoryDetail(e) {
     return;
   }
   document.getElementById("sheetBackdrop").className = "detail-sheet-backdrop";
+  collapseSheet();
 }
 
 // 목록 ↔ 지도 토글 스위칭
@@ -3728,6 +3892,7 @@ function logoutFamily() {
   if (!confirm("현재 계정에서 로그아웃하시겠습니까?")) return;
   localStorage.removeItem("fc_token");
   localStorage.removeItem("fc_user");
+  localStorage.removeItem("fc_text_size");
   AppState.token = null;
   AppState.currentUser = null;
   updateHeaderUserUI();

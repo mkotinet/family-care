@@ -3,7 +3,7 @@
  * Handles App Lifecycle, Background Sync, Offline Fallback & A2HS Installability
  */
 
-const CACHE_NAME = 'family-care-pwa-v1.4.4';
+const CACHE_NAME = 'family-care-pwa-v1.4.5';
 
 // 1. Service Worker Installation
 self.addEventListener('install', (event) => {

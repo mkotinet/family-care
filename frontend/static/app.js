@@ -782,15 +782,22 @@ function isHospitalCategory(cat) {
   return /약국|병원|의원|의료|클리닉|치과|안과|이비인후과|소아과|내과/i.test(cat);
 }
 
-// 1. 교통 즐겨찾기 클릭 (루트 ID 기반 포커스)
+// 1. 교통 즐겨찾기 클릭 (루트 ID 기반 포커스 - 최상단 즐겨찾기 카드 및 양방향 스위치 즉시 노출)
 async function focusFavoriteTransitRouteById(routeId) {
   await openCategoryDetail('transit');
-  const t = (AppState.loadedTransit || []).find(item => item.id == routeId);
-  if (t && t.station_name) {
-    setTimeout(() => {
-      selectBusStopFromList(t.station_name);
-    }, 300);
-  }
+  setTimeout(() => {
+    const cardEl = document.getElementById(`fav-route-card-${routeId}`);
+    if (cardEl) {
+      cardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      cardEl.style.transition = 'all 0.3s ease';
+      cardEl.style.border = '2px solid #0284c7';
+      cardEl.style.boxShadow = '0 0 0 4px rgba(2, 132, 199, 0.25)';
+      setTimeout(() => {
+        cardEl.style.border = '';
+        cardEl.style.boxShadow = '';
+      }, 2000);
+    }
+  }, 200);
 }
 window.focusFavoriteTransitRouteById = focusFavoriteTransitRouteById;
 
@@ -2528,8 +2535,8 @@ async function selectBusStopOnMap(stop, customDirection = null) {
   }
 
   const isHopyeong = curDir === "hopyeong";
-  const defaultNextDir = isHopyeong ? "평내신명.대주.금호아파트 방면" : "평내동주민센터.남양주소방서 방면";
-  const defaultArsId = isHopyeong ? "23453" : "23454";
+  const defaultNextDir = stop.next_station || (isHopyeong ? "평내신명.대주.금호아파트 방면" : "평내동주민센터.남양주소방서 방면");
+  const defaultArsId = stop.ars_id || (isHopyeong ? "23453" : "23454");
 
   openSelectedPlaceCard({
     category: "교통",
@@ -2766,29 +2773,14 @@ async function renderTransitDetail(el) {
   el.innerHTML = `
     ${activeAlarmsHtml}
 
+    <!-- 1순위 최상단: 내 즐겨찾기 구간 & 양방향(가는 길 ⇄ 오는 길) 버스 시간표 (가려짐 방지) -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-      <span style="font-size: 13px; font-weight: 800;">📍 내 주변 버스 정류소 (터치 시 실시간 도착 정보)</span>
+      <span style="font-size: 13px; font-weight: 800; color: #0f172a;">🚌 내 즐겨찾기 구간 & 양방향 실시간 버스</span>
       <button class="btn-mini btn-fav" onclick="openRouteModal()">+ 새 루트 등록</button>
     </div>
-
-    <div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 12px;">
-      ${stops.map(s => `
-        <div style="flex: 0 0 auto; background: #f0f9ff; border: 1.5px solid #bae6fd; border-radius: 10px; padding: 7px 12px; font-size: 12px; cursor: pointer; transition: all 0.15s;" onclick="selectBusStopFromList('${s.name}')">
-          🚏 <strong>${s.name}</strong> <span style="font-size: 10px; color: #0284c7;">(${s.distance}m)</span>
-        </div>
-      `).join("")}
-    </div>
-
-    <!-- 목록에서 선택한 정류소 실시간 도착 버스 정보 영역 -->
-    <div id="listSelectedStopArrivals" style="margin-bottom: 14px;"></div>
-
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-      <span style="font-size: 13px; font-weight: 800;">🚌 내 즐겨찾기 구간 및 운행 버스 시간표</span>
-      <span style="font-size: 11px; color: #0284c7; font-weight: 700;">상단 🗺️ 지도 탭에서도 정류소 선택 가능</span>
-    </div>
     
-    <div style="display: flex; flex-direction: column; gap: 12px;">
-      ${routes.map(r => {
+    <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px;">
+      ${routes.length > 0 ? routes.map(r => {
         const ret = r.return_trip;
         const isRev = Boolean(AppState.routeDetailDirectionReverse && AppState.routeDetailDirectionReverse[r.id]);
         
@@ -2799,35 +2791,39 @@ async function renderTransitDetail(el) {
         const curBuses = isRev ? (ret && ret.all_buses && ret.all_buses.length > 0 ? ret.all_buses : r.all_buses) : (r.all_buses || []);
 
         return `
-          <div class="item-card" style="padding: 12px;">
+          <div id="fav-route-card-${r.id}" class="item-card" style="padding: 12px; border: 1.5px solid ${isRev ? '#bae6fd' : '#e2e8f0'}; background: ${isRev ? '#f0f9ff' : '#ffffff'}; border-radius: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
             <div class="item-card-top" style="align-items: center;">
               <div>
-                <span class="item-name" style="font-size: 13px; color: #0f172a;">${r.title || (curOrigin + ' ⇄ ' + curDest)}</span>
-                <div class="item-desc" style="margin-top: 2px;">📍 ${curOrigin} ➔ ${curDest}</div>
+                <span class="item-name" style="font-size: 14px; font-weight: 800; color: #0f172a;">${r.title || (curOrigin + ' ⇄ ' + curDest)}</span>
+                <div class="item-desc" style="margin-top: 2px; font-size: 11.5px; font-weight: 700; color: #0284c7;">
+                  📍 ${curOrigin} ➔ ${curDest}
+                </div>
               </div>
               <div style="display: flex; align-items: center; gap: 6px;">
-                <span class="item-badge" style="background: ${curColor}; color: white;">${curTime}</span>
-                <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:6px; padding:3px 7px; font-size:11px; cursor:pointer;" title="즐겨찾기 삭제" onclick="deleteTransitRoute(${r.id})">🗑️</button>
+                <span class="item-badge" style="background: ${curColor}; color: white; font-weight: 800; padding: 4px 10px; border-radius: 8px;">${curTime}</span>
+                <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:6px; padding:4px 8px; font-size:11px; font-weight:700; cursor:pointer;" title="즐겨찾기 삭제" onclick="deleteTransitRoute(${r.id})">🗑️</button>
               </div>
             </div>
 
-            <!-- 양방향 (가는 길 ⇄ 오는 길) 원클릭 전환 탭 바 -->
+            <!-- 양방향 (가는 길 ⇄ 오는 길) 원클릭 대형 스위치 탭 바 (눈에 확 띄는 버튼 디자인) -->
             ${ret ? `
-              <div style="display: flex; gap: 6px; margin: 8px 0; background: #f1f5f9; padding: 4px; border-radius: 8px;">
-                <button style="flex: 1; border: none; padding: 5px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s; background: ${!isRev ? '#ffffff' : 'transparent'}; color: ${!isRev ? '#0369a1' : '#64748b'}; box-shadow: ${!isRev ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'};" onclick="toggleRouteDetailDirection(${r.id}, false)">
-                  ➡️ 가는 길 (${r.station_name}발: ${r.remain_time})
+              <div style="display: flex; gap: 8px; margin: 10px 0 8px 0; background: #e2e8f0; padding: 4px; border-radius: 10px;">
+                <button style="flex: 1; border: none; padding: 7px 10px; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 4px; background: ${!isRev ? '#0284c7' : '#ffffff'}; color: ${!isRev ? '#ffffff' : '#475569'}; box-shadow: ${!isRev ? '0 2px 6px rgba(2,132,199,0.3)' : 'none'};" onclick="toggleRouteDetailDirection(${r.id}, false)">
+                  <span>➡️ 가는 길</span>
+                  <span style="font-size: 10.5px; opacity: 0.9;">(${r.station_name}발)</span>
                 </button>
-                <button style="flex: 1; border: none; padding: 5px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s; background: ${isRev ? '#ffffff' : 'transparent'}; color: ${isRev ? '#0369a1' : '#64748b'}; box-shadow: ${isRev ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'};" onclick="toggleRouteDetailDirection(${r.id}, true)">
-                  ⬅️ 오는 길 (${ret.station_name}발: ${ret.remain_time})
+                <button style="flex: 1; border: none; padding: 7px 10px; border-radius: 8px; font-size: 12px; font-weight: 800; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 4px; background: ${isRev ? '#0284c7' : '#ffffff'}; color: ${isRev ? '#ffffff' : '#475569'}; box-shadow: ${isRev ? '0 2px 6px rgba(2,132,199,0.3)' : 'none'};" onclick="toggleRouteDetailDirection(${r.id}, true)">
+                  <span>⬅️ 오는 길</span>
+                  <span style="font-size: 10.5px; opacity: 0.9;">(${ret.station_name}발)</span>
                 </button>
               </div>
             ` : ''}
 
             <!-- 구간 내 운행 버스 전체 실시간 시간표 -->
-            <div class="route-all-buses-box">
-              <div class="route-all-buses-header">
-                <span>🚌 ${curOrigin} 운행 버스 시간표 (${curBuses.length}대)</span>
-                <span style="font-size: 10px; color: #0284c7;">🔔 터치 시 도착 알림</span>
+            <div class="route-all-buses-box" style="margin-top: 8px;">
+              <div class="route-all-buses-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <span>🚌 <strong>${curOrigin}</strong> 실시간 운행 버스 (${curBuses.length}대)</span>
+                <span style="font-size: 10.5px; color: #0284c7; font-weight: 700;">터치 시 도착 알림 예약</span>
               </div>
               ${curBuses.length > 0 ? curBuses.map(b => {
                 const hasAlarm = AppState.busAlerts.some(al => al.routeNo === b.route_no && al.stationName === curOrigin);
@@ -2854,8 +2850,30 @@ async function renderTransitDetail(el) {
             </div>
           </div>
         `;
-      }).join("")}
+      }).join("") : `
+        <div style="background: #f8fafc; border: 1.5px dashed #cbd5e1; border-radius: 12px; padding: 14px; text-align: center; color: #64748b; font-size: 12px;">
+          등록된 버스 즐겨찾기 루트가 없습니다.<br>
+          아래 정류소나 상단 <strong>[🗺️ 지도]</strong> 탭에서 출발지와 도착지를 선택하여 등록하세요!
+        </div>
+      `}
     </div>
+
+    <!-- 2순위: 내 주변 정류소 실시간 조회 -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-top: 10px; border-top: 1px solid #e2e8f0;">
+      <span style="font-size: 13px; font-weight: 800; color: #0f172a;">📍 내 주변 버스 정류소 (터치 시 실시간 도착 버스 조회)</span>
+      <span style="font-size: 11px; color: #0284c7; font-weight: 700;">상단 🗺️ 지도에서도 선택 가능</span>
+    </div>
+
+    <div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 12px;">
+      ${stops.map(s => `
+        <div style="flex: 0 0 auto; background: #f0f9ff; border: 1.5px solid #bae6fd; border-radius: 10px; padding: 7px 12px; font-size: 12px; cursor: pointer; transition: all 0.15s;" onclick="selectBusStopFromList('${s.name}')">
+          🚏 <strong>${s.name}</strong> <span style="font-size: 10px; color: #0284c7;">(${s.distance}m)</span>
+        </div>
+      `).join("")}
+    </div>
+
+    <!-- 목록에서 선택한 주변 정류소 실시간 도착 버스 정보 영역 -->
+    <div id="listSelectedStopArrivals" style="margin-bottom: 14px;"></div>
   `;
 }
 

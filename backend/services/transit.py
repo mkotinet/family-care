@@ -10,105 +10,105 @@ from backend.mock_data import get_simulated_transit
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
 async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
-    cache_key = f"bus_stops_v5_{round(lat, 3)}_{round(lon, 3)}"
+    cache_key = f"bus_stops_v6_{round(lat, 3)}_{round(lon, 3)}"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
 
     # 평내·호평 핵심 거점 정류소 12대 기본 탑재 (카카오버스 맵 실측 좌표 및 공식 명칭·양방향 ARS-ID 100% 일치)
     core_stops = [
-        # 1. 평내화성.유진아파트 (유진몬테소리어린이집 앞 1308동 도로변 - 호평동 방면)
+        # 1. 평내화성.유진아파트 (화성파크힐즈 1701동 CU 앞 - 호평동·수진사 방면 / 카카오버스 23453 정답)
         {
             "id": "23453",
             "name": "평내화성.유진아파트",
-            "full_name": "평내화성.유진아파트 (23453)",
-            "address": "경기 남양주시 평내로 89 (유진몬테소리어린이집 앞)",
-            "latitude": 37.642380,
-            "longitude": 127.235250,
+            "full_name": "평내화성.유진아파트 (호평행)",
+            "address": "경기 남양주시 평내로 72 (화성파크힐즈 1701동 CU 앞)",
+            "latitude": 37.642150,
+            "longitude": 127.235650,
             "direction": "hopyeong",
             "next_station": "평내신명.대주.금호아파트 방면",
             "ars_id": "23453"
         },
-        # 2. 평내화성.유진아파트 (화성파크힐즈 1701동 CU 및 평내4호공원 앞 - 서울/청량리/잠실 방면)
+        # 2. 평내화성.유진아파트 (유진몬테소리어린이집 앞 1308동 도로변 - 서울/청량리/잠실 방면 / 카카오버스 23454 정답)
         {
             "id": "23454",
             "name": "평내화성.유진아파트",
-            "full_name": "평내화성.유진아파트 (23454)",
-            "address": "경기 남양주시 평내로 72 (화성파크힐즈 CU 앞)",
-            "latitude": 37.642150,
-            "longitude": 127.235650,
+            "full_name": "평내화성.유진아파트 (서울행)",
+            "address": "경기 남양주시 평내로 89 (유진몬테소리어린이집 앞)",
+            "latitude": 37.642380,
+            "longitude": 127.235250,
             "direction": "seoul",
             "next_station": "평내동주민센터.남양주소방서 방면",
             "ars_id": "23454"
         },
-        # 3. 평내신명.대주.금호아파트 (호평동 방면)
+        # 3. 평내신명.대주.금호아파트 (남동쪽 도로변 - 호평동 방면)
         {
             "id": "23455",
             "name": "평내신명.대주.금호아파트",
-            "full_name": "평내신명.대주.금호아파트 (23455)",
-            "address": "경기 남양주시 평내로 115 (평내2차대주 앞)",
-            "latitude": 37.643800,
-            "longitude": 127.238500,
+            "full_name": "평내신명.대주.금호아파트 (호평행)",
+            "address": "경기 남양주시 평내로 116 (남동쪽 도로변)",
+            "latitude": 37.643650,
+            "longitude": 127.238700,
             "direction": "hopyeong",
             "next_station": "평내중흥.유라.삼창아파트 방면",
             "ars_id": "23455"
         },
-        # 4. 평내신명.대주.금호아파트 (서울 방면)
+        # 4. 평내신명.대주.금호아파트 (북서쪽 평내2차대주 앞 - 서울 방면)
         {
             "id": "23456",
             "name": "평내신명.대주.금호아파트",
-            "full_name": "평내신명.대주.금호아파트 (23456)",
-            "address": "경기 남양주시 평내로 116",
-            "latitude": 37.643650,
-            "longitude": 127.238700,
+            "full_name": "평내신명.대주.금호아파트 (서울행)",
+            "address": "경기 남양주시 평내로 115 (평내2차대주 앞)",
+            "latitude": 37.643800,
+            "longitude": 127.238500,
             "direction": "seoul",
             "next_station": "평내화성.유진아파트 방면",
             "ars_id": "23456"
         },
-        # 5. 평내중흥.유라.삼창아파트 (호평동 방면)
+        # 5. 평내중흥.유라.삼창아파트 (남동쪽 도로변 - 호평동 방면)
         {
             "id": "23457",
             "name": "평내중흥.유라.삼창아파트",
-            "full_name": "평내중흥.유라.삼창아파트 (23457)",
-            "address": "경기 남양주시 평내로 150 (중흥S클래스1단지 앞)",
-            "latitude": 37.646500,
-            "longitude": 127.241600,
+            "full_name": "평내중흥.유라.삼창아파트 (호평행)",
+            "address": "경기 남양주시 평내로 151 (남동쪽 도로변)",
+            "latitude": 37.646300,
+            "longitude": 127.241800,
             "direction": "hopyeong",
             "next_station": "평내호평역 방면",
             "ars_id": "23457"
         },
-        # 6. 평내중흥.유라.삼창아파트 (서울 방면)
+        # 6. 평내중흥.유라.삼창아파트 (북서쪽 중흥1단지 앞 - 서울 방면)
         {
             "id": "23458",
             "name": "평내중흥.유라.삼창아파트",
-            "full_name": "평내중흥.유라.삼창아파트 (23458)",
-            "address": "경기 남양주시 평내로 151",
-            "latitude": 37.646300,
-            "longitude": 127.241800,
+            "full_name": "평내중흥.유라.삼창아파트 (서울행)",
+            "address": "경기 남양주시 평내로 150 (중흥S클래스1단지 앞)",
+            "latitude": 37.646500,
+            "longitude": 127.241600,
             "direction": "seoul",
             "next_station": "평내신명.대주.금호아파트 방면",
             "ars_id": "23458"
         },
-        # 7. 평내동주민센터.남양주소방서 (호평동 방면)
+        # 7. 평내동주민센터.남양주소방서 (남동쪽 도로변 - 호평동 방면)
         {
             "id": "23451",
             "name": "평내동주민센터.남양주소방서",
-            "full_name": "평내동주민센터.남양주소방서 (23451)",
-            "address": "경기 남양주시 평내로 110",
-            "latitude": 37.641600,
-            "longitude": 127.228900,
+            "full_name": "평내동주민센터.남양주소방서 (호평행)",
+            "address": "경기 남양주시 평내로 111 (남동쪽 도로변)",
+            "latitude": 37.641350,
+            "longitude": 127.229100,
             "direction": "hopyeong",
             "next_station": "평내화성.유진아파트 방면",
             "ars_id": "23451"
         },
-        # 8. 평내동주민센터.남양주소방서 (서울 방면)
+        # 8. 평내동주민센터.남양주소방서 (북서쪽 소방서 앞 - 서울 방면)
         {
             "id": "23452",
             "name": "평내동주민센터.남양주소방서",
-            "full_name": "평내동주민센터.남양주소방서 (23452)",
-            "address": "경기 남양주시 평내로 111",
-            "latitude": 37.641350,
-            "longitude": 127.229100,
+            "full_name": "평내동주민센터.남양주소방서 (서울행)",
+            "address": "경기 남양주시 평내로 110 (소방서 앞)",
+            "latitude": 37.641600,
+            "longitude": 127.228900,
             "direction": "seoul",
             "next_station": "돌팍고개 방면",
             "ars_id": "23452"
@@ -204,6 +204,7 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
                             "address": d.get("road_address_name") or d.get("address_name"),
                             "latitude": float(d.get("y")),
                             "longitude": float(d.get("x")),
+                            "direction": "hopyeong",
                             "distance": int(d.get("distance", 0))
                         }
         except Exception:
@@ -221,6 +222,8 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
     for s in stops_list:
         s["lat"] = float(s["latitude"])
         s["lon"] = float(s["longitude"])
+        if "direction" not in s:
+            s["direction"] = "hopyeong"
         s["distance"] = get_dist_meters(lat, lon, s["latitude"], s["longitude"])
 
     stops_list.sort(key=lambda x: x["distance"])

@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=4.0, user-scalable=yes, viewport-fit=cover">
   <title>우리가족챙기기 - 데일리 라이프 비서</title>
-  <link rel="stylesheet" href="/static/style.css?v=1.4.7">
-  <link rel="manifest" href="/manifest.json?v=1.4.7">
+  <link rel="stylesheet" href="/static/style.css?v=1.4.8">
+  <link rel="manifest" href="/manifest.json?v=1.4.8">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="/static/icons/icon-512.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png">
@@ -355,12 +355,21 @@
       </div>
 
       <!-- 실시간 세션 모니터링 상태 바 -->
-      <div class="safety-monitor-status-bar" id="safetyLiveStatusHeader" style="display: flex; align-items: center; justify-content: space-between; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 7px 12px; margin-bottom: 10px; font-size: 11px; color: #166534;">
+      <div class="safety-monitor-status-bar" id="safetyLiveStatusHeader" style="display: flex; align-items: center; justify-content: space-between; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 7px 12px; margin-bottom: 8px; font-size: 11px; color: #166534;">
         <div style="display: flex; align-items: center; gap: 6px;">
           <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e;"></span>
           <span style="font-weight: 800;">아이들 계정 실시간 접속 모니터링 연동 중</span>
         </div>
         <span id="safetyLastCheckTime" style="font-size: 10px; color: #15803d; font-weight: 700;">방금 확인</span>
+      </div>
+
+      <!-- 백그라운드 상주 설정 가이드 호출 배너 -->
+      <div style="display: flex; justify-content: space-between; align-items: center; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; cursor: pointer;" onclick="openKeepAliveGuideModal()">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 14px;">📲</span>
+          <span style="font-size: 11.5px; font-weight: 700; color: #1e40af;">앱 닫아도 항상 메모리 상주 & 위치 유지 설정</span>
+        </div>
+        <span style="font-size: 11px; color: #2563eb; font-weight: 800;">설정법 보기 ➔</span>
       </div>
 
       <div class="safety-map-container">
@@ -517,13 +526,96 @@
 
       <div class="auth-input-group" style="margin-top: 16px;">
         <label style="font-size: 12px; font-weight: 700; color: #1e293b;">하루퀴즈 비밀번호 (필수)</label>
-        <input type="password" id="inputAuthPassword" placeholder="하루퀴즈 비밀번호 입력 (예: 3635)" style="width: 100%; padding: 10px; border-radius: 10px; border: 1.5px solid #cbd5e1; margin-top: 4px; font-size: 14px;" onkeydown="if(event.key==='Enter') submitFamilyLogin()">
+        <input type="password" id="inputAuthPassword" placeholder="하루퀴즈 비밀번호를 입력하세요" style="width: 100%; padding: 10px; border-radius: 10px; border: 1.5px solid #cbd5e1; margin-top: 4px; font-size: 14px;" onkeydown="if(event.key==='Enter') submitFamilyLogin()">
         <p style="font-size: 11px; color: #64748b; margin-top: 4px;">* 하루퀴즈(haru.danminlove.com) 비밀번호와 100% 동일하게 검증됩니다.</p>
       </div>
 
       <div id="authModalFooterActions" style="display: flex; gap: 8px; margin-top: 18px; justify-content: space-between; align-items: center;">
         <button onclick="closeLoginModal()" class="btn-secondary" style="padding: 10px 16px;">닫기</button>
         <button onclick="submitFamilyLogin()" class="btn-primary" style="padding: 10px 18px;">로그인하기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7-1. [모달] 스마트폰 백그라운드 상주 & 위치 유지 설정 가이드 모달 -->
+  <div class="modal-overlay" id="modalKeepAliveGuide" onclick="closeKeepAliveGuideModal(event)">
+    <div class="modal-content" style="max-width: 480px; max-height: 85vh; overflow-y: auto;" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="modal-title">📲 스마트폰 백그라운드 상주 설정 가이드</div>
+        <button class="sheet-close-btn" onclick="closeKeepAliveGuideModal()">✕</button>
+      </div>
+      <p style="font-size: 12px; color: #64748b; margin-bottom: 14px; line-height: 1.5;">
+        스마트폰 OS(iOS/Android)는 화면이 꺼지면 배터리 절약을 위해 앱 실행을 중단합니다. <strong>아래 2가지 설정</strong>을 완료하시면 앱을 닫거나 화면이 꺼져도 백그라운드에서 실시간 위치가 끊김 없이 유지됩니다.
+      </p>
+
+      <!-- 탭 선택: 아이폰 vs 갤럭시 -->
+      <div style="display: flex; gap: 8px; margin-bottom: 14px;">
+        <button id="tabGuideIphone" class="btn-filter-pill active" style="flex: 1; padding: 8px; font-weight: 800; font-size: 13px;" onclick="switchKeepAliveTab('iphone')">
+          🍎 아이폰 15 / 16 (자녀)
+        </button>
+        <button id="tabGuideGalaxy" class="btn-filter-pill" style="flex: 1; padding: 8px; font-weight: 800; font-size: 13px;" onclick="switchKeepAliveTab('galaxy')">
+          🤖 갤럭시 폴드 3 / 8 (부모)
+        </button>
+      </div>
+
+      <!-- 아이폰 가이드 내용 -->
+      <div id="guideContentIphone" style="display: block;">
+        <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 12px; margin-bottom: 10px;">
+          <div style="font-weight: 800; font-size: 13px; color: #0f172a; margin-bottom: 6px;">1단계: 홈 화면에 앱 추가 (PWA 독립 실행)</div>
+          <div style="font-size: 12px; color: #334155; line-height: 1.6;">
+            Safari 브라우저 하단의 <strong>[공유(네모 화살표)]</strong> 버튼 ➔ <strong>[홈 화면에 추가]</strong>를 누릅니다.<br>
+            <span style="font-size: 11px; color: #0284c7;">* 홈 화면 아이콘으로 실행해야 백그라운드 캐시가 안전하게 상주합니다.</span>
+          </div>
+        </div>
+
+        <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 12px; margin-bottom: 10px;">
+          <div style="font-weight: 800; font-size: 13px; color: #0f172a; margin-bottom: 6px;">2단계: 위치 권한 '앱을 사용하는 동안' 및 정확한 위치 켬</div>
+          <div style="font-size: 12px; color: #334155; line-height: 1.6;">
+            아이폰 <strong>[설정] ➔ [개인정보 보호 및 보안] ➔ [위치 서비스] ➔ [Safari 웹사이트(또는 가족지키미)]</strong><br>
+            ➔ 위치 허용을 <strong>[앱을 사용하는 동안]</strong>으로 선택하고, <strong>[정확한 위치]를 활성화(초록색)</strong>합니다.
+          </div>
+        </div>
+
+        <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 12px;">
+          <div style="font-weight: 800; font-size: 13px; color: #0f172a; margin-bottom: 6px;">3단계: 백그라운드 앱 새로고침 활성화</div>
+          <div style="font-size: 12px; color: #334155; line-height: 1.6;">
+            아이폰 <strong>[설정] ➔ [일반] ➔ [백그라운드 앱 새로고침]</strong><br>
+            ➔ <strong>[Wi-Fi 및 셀룰러 데이터]</strong>로 켬 상태인지 확인합니다.
+          </div>
+        </div>
+      </div>
+
+      <!-- 갤럭시 가이드 내용 -->
+      <div id="guideContentGalaxy" style="display: none;">
+        <div style="background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 12px; padding: 12px; margin-bottom: 10px;">
+          <div style="font-weight: 800; font-size: 13px; color: #1e3a8a; margin-bottom: 6px;">⚡ 가장 중요: 배터리 '제한 없음' 설정 (앱 절전 방지)</div>
+          <div style="font-size: 12px; color: #1e40af; line-height: 1.6;">
+            갤럭시 <strong>[설정] ➔ [애플리케이션] ➔ [Chrome 또는 가족지키미]</strong> 선택<br>
+            ➔ <strong>[배터리]</strong> 메뉴 클릭<br>
+            ➔ 기본값 '최적화' 대신 <strong>['제한 없음']</strong>을 선택합니다.<br>
+            <span style="font-size: 11px; color: #e11d48; font-weight: 700;">* '제한 없음'을 해야 갤럭시가 화면 꺼짐 시 앱을 강제 종료하지 않습니다!</span>
+          </div>
+        </div>
+
+        <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 12px; margin-bottom: 10px;">
+          <div style="font-weight: 800; font-size: 13px; color: #0f172a; margin-bottom: 6px;">2단계: 위치 권한 '항상 허용'</div>
+          <div style="font-size: 12px; color: #334155; line-height: 1.6;">
+            갤럭시 <strong>[애플리케이션] ➔ [권한] ➔ [위치]</strong><br>
+            ➔ <strong>[항상 허용]</strong>(또는 '앱 사용 중에만 허용') 및 <strong>'정확한 위치 사용'</strong>을 활성화합니다.
+          </div>
+        </div>
+
+        <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 12px;">
+          <div style="font-weight: 800; font-size: 13px; color: #0f172a; margin-bottom: 6px;">3단계: 백그라운드 데이터 사용 허용</div>
+          <div style="font-size: 12px; color: #334155; line-height: 1.6;">
+            갤럭시 <strong>[애플리케이션] ➔ [모바일 데이터]</strong><br>
+            ➔ <strong>[백그라운드 데이터 사용 허용]</strong> 및 <strong>[데이터 절약 모드 미적용]</strong>을 켭니다.
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; margin-top: 16px;">
+        <button onclick="closeKeepAliveGuideModal()" class="btn-primary" style="padding: 10px 20px;">확인 완료</button>
       </div>
     </div>
   </div>
@@ -757,6 +849,6 @@
     <span class="zoom-reset-btn" title="기본 크기로 복귀">✕ 리셋</span>
   </div>
 
-  <script src="/static/app.js?v=1.4.7"></script>
+  <script src="/static/app.js?v=1.4.8"></script>
 </body>
 </html>

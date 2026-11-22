@@ -65,8 +65,8 @@ async def authenticate_user(username: str, password: str = "", device_info: str 
     stored_hash = user["password_hash"]
     input_hash = hash_password(password)
 
-    # 하루퀴즈 인증 통과 또는 로컬 해시 일치 또는 가족 간편비번(3635, haru1234) 검증
-    is_valid = haru_ok or (stored_hash and input_hash == stored_hash) or (password in ["3635", "1234", "haru1234"])
+    # 하루퀴즈 인증 통과 또는 로컬 암호화 해시 일치 검증
+    is_valid = haru_ok or (stored_hash and input_hash == stored_hash)
 
     if not is_valid:
         conn.close()

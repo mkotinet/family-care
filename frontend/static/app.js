@@ -932,23 +932,38 @@ async function loadFavorites() {
     const hospitalItems = [];
     const otherItems = [];
 
-    // 1) 교통 루트 항목
+    // 1) 교통 루트 항목 (양방향 버스 도착 정보 완비 - 가는 길 ⇄ 오는 길 듀얼 표출)
     (transit || []).forEach(t => {
+      const ret = t.return_trip;
+      const isReverse = Boolean(AppState.routeDirectionReverse && AppState.routeDirectionReverse[t.id]);
+      
+      const mainOrigin = isReverse ? (ret ? ret.station_name : (t.dest_station_name || t.destination)) : t.station_name;
+      const mainDest = isReverse ? t.station_name : (t.dest_station_name || t.destination);
+      const mainTime = isReverse ? (ret ? ret.remain_time : t.remain_time) : t.remain_time;
+      const mainColor = isReverse ? (ret ? ret.badge_color : t.badge_color) : t.badge_color;
+      
+      const subOrigin = isReverse ? t.station_name : (ret ? ret.station_name : (t.dest_station_name || t.destination));
+      const subTime = isReverse ? t.remain_time : (ret ? ret.remain_time : '운행 대기');
+
       transitItems.push(`
         <div class="fav-card" onclick="focusFavoriteTransitRouteById(${t.id})">
           <div class="fav-card-top" style="display: flex; justify-content: space-between; align-items: center;">
-            <span class="fav-card-tag" style="background: #e0f2fe; color: #0369a1;">🚌 ${t.route_no}</span>
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <span class="fav-card-tag" style="background: #e0f2fe; color: #0369a1;">🚌 ${t.route_no}</span>
+              <button class="btn-mini" style="background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; font-size: 10px; padding: 1px 6px; border-radius: 6px; cursor: pointer;" title="양방향 전환" onclick="event.stopPropagation(); toggleFavTransitDirection(${t.id})">⇄ 왕복</button>
+            </div>
             <div style="display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation()">
               <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick="openEditTransitModalById(${t.id})">✏️</button>
               <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="삭제" onclick="deleteTransitRoute(${t.id})">🗑️</button>
             </div>
           </div>
           <div>
-            <div class="fav-card-title">${t.title}</div>
-            <div class="fav-card-sub">${t.station_name} ➔ ${t.destination || t.dest_station_name}</div>
+            <div class="fav-card-title">${t.title || (mainOrigin + ' ⇄ ' + mainDest)}</div>
+            <div class="fav-card-sub" style="font-weight: 700; color: #1e293b;">${mainOrigin} ➔ ${mainDest}</div>
+            ${ret ? `<div style="font-size: 10.5px; color: #64748b; margin-top: 2px;">반대편(${subOrigin}): <strong style="color: #0284c7;">${subTime}</strong></div>` : ''}
           </div>
-          <div class="fav-card-highlight" style="color: ${t.badge_color};">
-            ${t.remain_time}
+          <div class="fav-card-highlight" style="color: ${mainColor};">
+            ${mainTime}
           </div>
         </div>
       `);
@@ -2774,28 +2789,48 @@ async function renderTransitDetail(el) {
     
     <div style="display: flex; flex-direction: column; gap: 12px;">
       ${routes.map(r => {
-        const allBuses = r.all_buses || [];
+        const ret = r.return_trip;
+        const isRev = Boolean(AppState.routeDetailDirectionReverse && AppState.routeDetailDirectionReverse[r.id]);
+        
+        const curOrigin = isRev ? (ret ? ret.station_name : (r.dest_station_name || r.destination)) : r.station_name;
+        const curDest = isRev ? r.station_name : (r.dest_station_name || r.destination || '시내방면');
+        const curTime = isRev ? (ret ? ret.remain_time : r.remain_time) : r.remain_time;
+        const curColor = isRev ? (ret ? ret.badge_color : r.badge_color) : r.badge_color;
+        const curBuses = isRev ? (ret && ret.all_buses && ret.all_buses.length > 0 ? ret.all_buses : r.all_buses) : (r.all_buses || []);
+
         return `
           <div class="item-card" style="padding: 12px;">
             <div class="item-card-top" style="align-items: center;">
               <div>
-                <span class="item-name" style="font-size: 13px; color: #0f172a;">${r.title || (r.station_name + ' ➔ ' + (r.dest_station_name || r.destination))}</span>
-                <div class="item-desc" style="margin-top: 2px;">📍 ${r.station_name} ➔ ${r.dest_station_name || r.destination || '시내방면'}</div>
+                <span class="item-name" style="font-size: 13px; color: #0f172a;">${r.title || (curOrigin + ' ⇄ ' + curDest)}</span>
+                <div class="item-desc" style="margin-top: 2px;">📍 ${curOrigin} ➔ ${curDest}</div>
               </div>
               <div style="display: flex; align-items: center; gap: 6px;">
-                <span class="item-badge" style="background: ${r.badge_color}; color: white;">${r.remain_time}</span>
+                <span class="item-badge" style="background: ${curColor}; color: white;">${curTime}</span>
                 <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:6px; padding:3px 7px; font-size:11px; cursor:pointer;" title="즐겨찾기 삭제" onclick="deleteTransitRoute(${r.id})">🗑️</button>
               </div>
             </div>
 
+            <!-- 양방향 (가는 길 ⇄ 오는 길) 원클릭 전환 탭 바 -->
+            ${ret ? `
+              <div style="display: flex; gap: 6px; margin: 8px 0; background: #f1f5f9; padding: 4px; border-radius: 8px;">
+                <button style="flex: 1; border: none; padding: 5px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s; background: ${!isRev ? '#ffffff' : 'transparent'}; color: ${!isRev ? '#0369a1' : '#64748b'}; box-shadow: ${!isRev ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'};" onclick="toggleRouteDetailDirection(${r.id}, false)">
+                  ➡️ 가는 길 (${r.station_name}발: ${r.remain_time})
+                </button>
+                <button style="flex: 1; border: none; padding: 5px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; cursor: pointer; transition: all 0.2s; background: ${isRev ? '#ffffff' : 'transparent'}; color: ${isRev ? '#0369a1' : '#64748b'}; box-shadow: ${isRev ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'};" onclick="toggleRouteDetailDirection(${r.id}, true)">
+                  ⬅️ 오는 길 (${ret.station_name}발: ${ret.remain_time})
+                </button>
+              </div>
+            ` : ''}
+
             <!-- 구간 내 운행 버스 전체 실시간 시간표 -->
             <div class="route-all-buses-box">
               <div class="route-all-buses-header">
-                <span>🚌 이 구간 운행 버스 전체 시간표 (${allBuses.length}대)</span>
-                <span style="font-size: 10px; color: #0284c7;">🔔 터치 시 10/5/3분 도착 알림</span>
+                <span>🚌 ${curOrigin} 운행 버스 시간표 (${curBuses.length}대)</span>
+                <span style="font-size: 10px; color: #0284c7;">🔔 터치 시 도착 알림</span>
               </div>
-              ${allBuses.length > 0 ? allBuses.map(b => {
-                const hasAlarm = AppState.busAlerts.some(al => al.routeNo === b.route_no && al.stationName === r.station_name);
+              ${curBuses.length > 0 ? curBuses.map(b => {
+                const hasAlarm = AppState.busAlerts.some(al => al.routeNo === b.route_no && al.stationName === curOrigin);
                 return `
                   <div class="bus-row-item">
                     <div class="bus-row-left">
@@ -2807,7 +2842,7 @@ async function renderTransitDetail(el) {
                     </div>
                     <div class="bus-row-right">
                       <span style="font-weight: 800; color: #e11d48; font-size: 12px;">${b.remain_time}</span>
-                      <button class="btn-alarm-set ${hasAlarm ? 'active' : ''}" onclick="openBusAlarmModal({ route_no: '${b.route_no}', station_name: '${r.station_name}', destination: '${b.destination}', remain_time: '${b.remain_time}' })">
+                      <button class="btn-alarm-set ${hasAlarm ? 'active' : ''}" onclick="openBusAlarmModal({ route_no: '${b.route_no}', station_name: '${curOrigin}', destination: '${b.destination}', remain_time: '${b.remain_time}' })">
                         ${hasAlarm ? '🔔 예약됨' : '🔔 알림'}
                       </button>
                     </div>
@@ -3686,9 +3721,11 @@ function requestChildLocationRefresh() {
   openSafetyModal();
 }
 
-// 자녀 스마트폰에서 백그라운드 GPS 위치 자동 전송
+// 자녀 스마트폰에서 백그라운드 GPS 위치 자동 전송 및 상주 유지
 function startChildLocationTracker() {
   if (!navigator.geolocation || !AppState.currentUser) return;
+  const isChild = (AppState.currentUser.role_type === "CHILD" || AppState.currentUser.username === "도비사랑녀" || AppState.currentUser.username === "미니미니채");
+  if (!isChild) return;
 
   async function reportPos(pos) {
     if (!AppState.currentUser) return;
@@ -3696,7 +3733,7 @@ function startChildLocationTracker() {
     const lon = pos.coords.longitude;
     const acc = pos.coords.accuracy;
 
-    let batteryLevel = 85;
+    let batteryLevel = 88;
     try {
       if (navigator.getBattery) {
         const b = await navigator.getBattery();
@@ -3717,24 +3754,103 @@ function startChildLocationTracker() {
           is_moving: false
         })
       });
-      console.log("[GPS] Child location auto-reported successfully.");
+      console.log(`[GPS] 자녀(${AppState.currentUser.username}) 백그라운드 위치 보고 성공 (${new Date().toLocaleTimeString()})`);
     } catch (e) {}
   }
 
-  // 1. 즉시 1회 위치 리포트
-  navigator.geolocation.getCurrentPosition(
-    reportPos,
-    (err) => console.warn("GPS init error:", err),
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 10000 }
-  );
+  function triggerImmediatePing() {
+    navigator.geolocation.getCurrentPosition(
+      reportPos,
+      (err) => console.warn("GPS ping error:", err),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
+    );
+  }
 
-  // 2. 실시간 지속 감시
-  navigator.geolocation.watchPosition(
-    reportPos,
-    (err) => console.warn("GPS watch error:", err),
-    { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
-  );
+  // 1. 즉시 1회 위치 리포트
+  triggerImmediatePing();
+
+  // 2. 실시간 지속 감시 (watchPosition)
+  try {
+    if (AppState._geoWatchId) navigator.geolocation.clearWatch(AppState._geoWatchId);
+    AppState._geoWatchId = navigator.geolocation.watchPosition(
+      reportPos,
+      (err) => console.warn("GPS watch error:", err),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+    );
+  } catch (e) {}
+
+  // 3. 45초 간격 하트비트 핑 (메모리 상주 유지)
+  if (AppState._childPingTimer) clearInterval(AppState._childPingTimer);
+  AppState._childPingTimer = setInterval(() => {
+    triggerImmediatePing();
+  }, 45000);
+
+  // 4. 모바일 백그라운드 복귀 & BFCache 즉각 반응 (화면 켜지자마자 0.1초 동기화)
+  if (!window._keepAliveListenersBound) {
+    window._keepAliveListenersBound = true;
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        console.log("[KeepAlive] 화면 복귀 감지 -> 자녀 위치 즉시 동기화");
+        triggerImmediatePing();
+      }
+    });
+    window.addEventListener("pageshow", triggerImmediatePing);
+    window.addEventListener("focus", triggerImmediatePing);
+  }
 }
+
+// 홈 화면 즐겨찾기 교통 카드 양방향(가는 길 ⇄ 오는 길) 토글
+function toggleFavTransitDirection(routeId) {
+  if (!AppState.routeDirectionReverse) AppState.routeDirectionReverse = {};
+  AppState.routeDirectionReverse[routeId] = !AppState.routeDirectionReverse[routeId];
+  loadFavorites();
+}
+window.toggleFavTransitDirection = toggleFavTransitDirection;
+
+// 교통 상세 바텀시트에서 양방향 토글
+function toggleRouteDetailDirection(routeId, isReverse) {
+  if (!AppState.routeDetailDirectionReverse) AppState.routeDetailDirectionReverse = {};
+  AppState.routeDetailDirectionReverse[routeId] = isReverse;
+  const contentEl = document.getElementById("sheetContent");
+  if (contentEl) renderTransitDetail(contentEl);
+}
+window.toggleRouteDetailDirection = toggleRouteDetailDirection;
+
+// 스마트폰 백그라운드 상주 가이드 모달 열기/닫기/탭 전환
+function openKeepAliveGuideModal() {
+  const m = document.getElementById("modalKeepAliveGuide");
+  if (m) m.className = "modal-overlay active";
+}
+window.openKeepAliveGuideModal = openKeepAliveGuideModal;
+
+function closeKeepAliveGuideModal(e) {
+  if (e && e.target && e.target.id !== "modalKeepAliveGuide" && !e.target.classList.contains("sheet-close-btn") && !e.target.classList.contains("btn-primary")) {
+    return;
+  }
+  const m = document.getElementById("modalKeepAliveGuide");
+  if (m) m.className = "modal-overlay";
+}
+window.closeKeepAliveGuideModal = closeKeepAliveGuideModal;
+
+function switchKeepAliveTab(tab) {
+  const tabIphone = document.getElementById("tabGuideIphone");
+  const tabGalaxy = document.getElementById("tabGuideGalaxy");
+  const contentIphone = document.getElementById("guideContentIphone");
+  const contentGalaxy = document.getElementById("guideContentGalaxy");
+
+  if (tab === "iphone") {
+    if (tabIphone) tabIphone.className = "btn-filter-pill active";
+    if (tabGalaxy) tabGalaxy.className = "btn-filter-pill";
+    if (contentIphone) contentIphone.style.display = "block";
+    if (contentGalaxy) contentGalaxy.style.display = "none";
+  } else {
+    if (tabIphone) tabIphone.className = "btn-filter-pill";
+    if (tabGalaxy) tabGalaxy.className = "btn-filter-pill active";
+    if (contentIphone) contentIphone.style.display = "none";
+    if (contentGalaxy) contentGalaxy.style.display = "block";
+  }
+}
+window.switchKeepAliveTab = switchKeepAliveTab;
 
 // ==========================================
 // 6. 가족 전용 실시간 채팅방

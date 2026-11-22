@@ -112,9 +112,10 @@ async def get_family_locations():
     children = []
     parents = []
 
-    for r in rows:
+    for row_item in rows:
+        r = dict(row_item)
         # 1. 로그인 및 세션 실시간 모니터링 판별
-        token_last = r["token_last_used_at"]
+        token_last = r.get("token_last_used_at")
         is_online = False
         login_status = "NEVER_LOGGED_IN"
         login_badge = "⚪ 앱 미설치 / 미로그인"
@@ -127,26 +128,33 @@ async def get_family_locations():
                 else:
                     tok_dt = datetime.strptime(token_last, "%Y-%m-%d %H:%M:%S").replace(tzinfo=KST)
                 
+                if tok_dt.tzinfo is None:
+                    tok_dt = tok_dt.replace(tzinfo=KST)
+                
                 tok_diff = (now_dt - tok_dt).total_seconds()
-                if tok_diff < 300: # 5분 이내
+                is_child = (r.get("role_type") == "CHILD" or r.get("username") in ["도비사랑녀", "미니미니채"])
+                online_threshold = 3600 if is_child else 900  # 자녀는 1시간까지 백그라운드 상주 온라인 보장, 부모는 15분
+
+                if tok_diff < 900:  # 15분 이내
                     is_online = True
                     login_status = "ONLINE"
                     login_badge = "🟢 실시간 접속 중"
-                    login_desc = "방금 전 활동"
-                elif tok_diff < 3600:
-                    login_status = "RECENT"
-                    login_badge = "🟡 최근 접속"
-                    login_desc = f"{int(tok_diff // 60)}분 전 활동"
+                    login_desc = "실시간 활동 (메모리 상주)"
+                elif tok_diff < 3600:  # 1시간 이내
+                    is_online = is_child  # 자녀는 백그라운드 상주 온라인 유지
+                    login_status = "BACKGROUND_STANDBY"
+                    login_badge = "🟡 백그라운드 대기"
+                    login_desc = f"{int(tok_diff // 60)}분 전 활동 (메모리 상주)"
                 elif tok_diff < 86400:
-                    login_status = "OFFLINE"
-                    login_badge = "⚪ 오프라인"
+                    login_status = "STANDBY"
+                    login_badge = "🟠 대기 상태"
                     login_desc = f"{int(tok_diff // 3600)}시간 전 접속"
                 else:
                     login_status = "OFFLINE"
-                    login_badge = "⚪ 오프라인"
+                    login_badge = "⚪ 미접속"
                     login_desc = tok_dt.strftime("%m월 %d일 접속")
-            except Exception:
-                login_desc = token_last
+            except Exception as ex:
+                login_desc = f"활동 확인 ({str(ex)})"
 
         # 2. 위치 및 GPS 판별 (자녀는 위치 미보고 시에도 안심 거점 기본좌표를 보장하여 지도 핀 표출)
         has_real_gps = bool(r["updated_at"] and r["latitude"] is not None and r["longitude"] is not None)

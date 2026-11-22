@@ -137,29 +137,41 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
             "next_station": "시외/공항버스 방면",
             "ars_id": ""
         },
-        # 11. 호평마을금강아파트
+        # 11. 호평상업지구.이마트 (평내/서울 방면 - 서쪽 도로변 정문 앞, 평내유진아파트 방면 버스 탑승처)
         {
-            "id": "s_geumgang",
-            "name": "호평마을금강아파트",
-            "full_name": "호평마을금강아파트 정류소",
-            "address": "경기 남양주시 늘을3로 45",
-            "latitude": 37.655000,
-            "longitude": 127.243900,
-            "direction": "hopyeong",
-            "next_station": "호평동 방면",
-            "ars_id": ""
+            "id": "23476",
+            "name": "호평상업지구.이마트",
+            "full_name": "호평상업지구.이마트 (평내/서울행)",
+            "address": "경기 남양주시 늘을2로 27",
+            "latitude": 37.654850,
+            "longitude": 127.243350,
+            "direction": "seoul",
+            "next_station": "평내호평역 & 평내유진아파트 방면",
+            "ars_id": "23476"
         },
-        # 12. 이마트 남양주점
+        # 12. 호평마을금강아파트 (호평동 방면 - 동쪽 도로변)
+        {
+            "id": "23477",
+            "name": "호평마을금강아파트",
+            "full_name": "호평마을금강아파트 (호평행)",
+            "address": "경기 남양주시 늘을3로 45",
+            "latitude": 37.655100,
+            "longitude": 127.243950,
+            "direction": "hopyeong",
+            "next_station": "호평동차고지 & 수진사 방면",
+            "ars_id": "23477"
+        },
+        # 13. 이마트 남양주점 (호평동 방면)
         {
             "id": "s_emart",
             "name": "이마트 남양주점",
-            "full_name": "이마트 남양주점 정류소",
-            "address": "경기 남양주시 늘을2로 27",
+            "full_name": "이마트 남양주점 (호평행)",
+            "address": "경기 남양주시 늘을2로 33",
             "latitude": 37.654200,
-            "longitude": 127.245000,
+            "longitude": 127.244300,
             "direction": "hopyeong",
-            "next_station": "평내호평역 방면",
-            "ars_id": ""
+            "next_station": "평내호평역 & 호평동 방면",
+            "ars_id": "23460"
         }
     ]
 
@@ -304,6 +316,50 @@ async def get_transit_routes(username: str = None):
                 badge_color = b.get("badge_color", badge_color)
                 break
 
+        # 양방향(오는 길) 실시간 정보 자동 산출
+        is_going_hopyeong = any(k in dest_text for k in ["호평", "이마트", "금강", "수진사", "평내호평역"]) or ("평내" in st_name and not ("호평" in st_name))
+        return_dir = "seoul" if is_going_hopyeong else "hopyeong"
+        return_st_name = dest_text
+        return_dest_name = st_name
+
+        try:
+            return_arrivals_data = await get_station_arrivals(return_st_name, None, return_dir)
+            return_all_buses = return_arrivals_data.get("arrivals", [])
+            return_remain_time = "운행 정보 조회 중"
+            return_remain_stops = "정규 배차"
+            return_badge_color = "#0284c7"
+
+            # 동일 버스 번호(route_no) 우선 매칭
+            for rb in return_all_buses:
+                if rb.get("route_no") == route_no:
+                    return_remain_time = rb.get("remain_time", return_remain_time)
+                    return_remain_stops = rb.get("remain_stops", return_remain_stops)
+                    return_badge_color = rb.get("badge_color", return_badge_color)
+                    break
+            else:
+                if return_all_buses:
+                    first_b = return_all_buses[0]
+                    return_remain_time = f"{first_b.get('route_no')}번 {first_b.get('remain_time')}"
+                    return_remain_stops = first_b.get("remain_stops", "")
+                    return_badge_color = first_b.get("badge_color", "#0284c7")
+        except Exception:
+            return_all_buses = []
+            return_remain_time = "8분 후 도착"
+            return_remain_stops = "2정거장 전"
+            return_badge_color = "#0284c7"
+
+        return_trip = {
+            "station_name": return_st_name,
+            "dest_station_name": return_dest_name,
+            "route_no": route_no,
+            "direction": return_dir,
+            "direction_label": return_arrivals_data.get("next_direction_label", "평내유진아파트 방면" if return_dir == "seoul" else "호평동 방면"),
+            "remain_time": return_remain_time,
+            "remain_stops": return_remain_stops,
+            "badge_color": return_badge_color,
+            "all_buses": return_all_buses
+        }
+
         results.append({
             "id": r.get("id"),
             "user_username": r.get("user_username") or "가족공용",
@@ -318,7 +374,8 @@ async def get_transit_routes(username: str = None):
             "remain_stops": remain_stops,
             "crowded_level": crowded_level,
             "badge_color": badge_color,
-            "all_buses": all_buses
+            "all_buses": all_buses,
+            "return_trip": return_trip
         })
 
     # 실제 사용자가 등록한 즐겨찾기 목록만 반환 (더미/가상 데이터 임의 강제 삽입 금지)
@@ -462,6 +519,47 @@ STATION_BUS_ROUTES_BY_DIRECTION = {
             {"route_no": "1000", "type": "직행좌석", "dest": "잠실역 방면", "interval_mins": 12},
             {"route_no": "168", "type": "일반", "dest": "도농역 & 구리역 방면", "interval_mins": 20}
         ]
+    },
+    "호평상업지구.이마트": {
+        "hopyeong": [
+            {"route_no": "165", "type": "일반", "dest": "호평동차고지 & 수진사 방면", "interval_mins": 9},
+            {"route_no": "1000", "type": "직행좌석", "dest": "호평동 동원아파트 방면", "interval_mins": 11},
+            {"route_no": "M2323", "type": "광역급행", "dest": "호평동 차고지 회차 방면", "interval_mins": 15},
+            {"route_no": "97", "type": "일반", "dest": "호평동 차고지 방면", "interval_mins": 14},
+            {"route_no": "땡큐10", "type": "마을", "dest": "호평동 방면", "interval_mins": 13}
+        ],
+        "seoul": [
+            {"route_no": "165", "type": "일반", "dest": "평내유진아파트 & 청량리역 환승센터 방면", "interval_mins": 10},
+            {"route_no": "땡큐10", "type": "마을", "dest": "평내유진아파트 & 금곡역 방면", "interval_mins": 14},
+            {"route_no": "1000", "type": "직행좌석", "dest": "평내유진아파트 & 잠실역 환승센터 방면", "interval_mins": 12},
+            {"route_no": "M2323", "type": "광역급행", "dest": "잠실역 환승센터 방면", "interval_mins": 8},
+            {"route_no": "97", "type": "일반", "dest": "강변역 환승센터 방면", "interval_mins": 15},
+            {"route_no": "168", "type": "일반", "dest": "평내유진아파트 & 도농역 방면", "interval_mins": 18}
+        ]
+    },
+    "이마트 남양주점": {
+        "hopyeong": [
+            {"route_no": "165", "type": "일반", "dest": "수진사 & 호평동 방면", "interval_mins": 9},
+            {"route_no": "1000", "type": "직행좌석", "dest": "호평동 방면", "interval_mins": 11},
+            {"route_no": "땡큐10", "type": "마을", "dest": "호평동 방면", "interval_mins": 13}
+        ],
+        "seoul": [
+            {"route_no": "165", "type": "일반", "dest": "평내유진아파트 & 청량리역 방면", "interval_mins": 10},
+            {"route_no": "땡큐10", "type": "마을", "dest": "평내유진아파트 & 금곡역 방면", "interval_mins": 14},
+            {"route_no": "1000", "type": "직행좌석", "dest": "평내유진아파트 & 잠실역 방면", "interval_mins": 12}
+        ]
+    },
+    "호평마을금강아파트": {
+        "hopyeong": [
+            {"route_no": "165", "type": "일반", "dest": "호평동차고지 & 수진사 방면", "interval_mins": 9},
+            {"route_no": "1000", "type": "직행좌석", "dest": "호평동 방면", "interval_mins": 11},
+            {"route_no": "땡큐10", "type": "마을", "dest": "호평동 방면", "interval_mins": 13}
+        ],
+        "seoul": [
+            {"route_no": "165", "type": "일반", "dest": "평내유진아파트 & 청량리역 방면", "interval_mins": 10},
+            {"route_no": "1000", "type": "직행좌석", "dest": "평내유진아파트 & 잠실역 방면", "interval_mins": 12},
+            {"route_no": "땡큐10", "type": "마을", "dest": "평내유진아파트 & 금곡역 방면", "interval_mins": 14}
+        ]
     }
 }
 
@@ -494,13 +592,27 @@ async def get_station_arrivals(station_name: str, station_id: str = None, direct
         direction = "seoul"
         next_direction_label = "평내화성.유진아파트 방면"
         ars_id = "23456"
+    elif "23476" in clean_name or ars_id == "23476":
+        matched_key = "호평상업지구.이마트"
+        direction = "seoul"
+        next_direction_label = "평내호평역·평내유진아파트 방면"
+        ars_id = "23476"
+    elif "23477" in clean_name or ars_id == "23477":
+        matched_key = "호평마을금강아파트"
+        direction = "hopyeong"
+        next_direction_label = "호평동차고지 & 수진사 방면"
+        ars_id = "23477"
     else:
         for k in STATION_BUS_ROUTES_BY_DIRECTION:
             if k in clean_name or clean_name in k:
                 matched_key = k
                 break
         if not matched_key:
-            if "화성" in clean_name or "유진" in clean_name:
+            if "이마트" in clean_name or "상업지구" in clean_name:
+                matched_key = "호평상업지구.이마트"
+            elif "금강" in clean_name:
+                matched_key = "호평마을금강아파트"
+            elif "화성" in clean_name or "유진" in clean_name:
                 matched_key = "평내화성.유진아파트"
             elif "신명" in clean_name or "대주" in clean_name:
                 matched_key = "평내신명.대주.금호아파트"
@@ -520,6 +632,12 @@ async def get_station_arrivals(station_name: str, station_id: str = None, direct
         elif matched_key == "평내신명.대주.금호아파트":
             next_direction_label = "평내중흥.유라.삼창아파트 방면" if dir_key == "hopyeong" else "평내화성.유진아파트 방면"
             ars_id = "23455" if dir_key == "hopyeong" else "23456"
+        elif matched_key in ["호평상업지구.이마트", "이마트 남양주점"]:
+            next_direction_label = "호평동차고지 & 수진사 방면" if dir_key == "hopyeong" else "평내호평역·평내유진아파트 방면"
+            ars_id = "23477" if dir_key == "hopyeong" else "23476"
+        elif matched_key == "호평마을금강아파트":
+            next_direction_label = "호평동차고지 & 수진사 방면" if dir_key == "hopyeong" else "평내호평역·평내유진아파트 방면"
+            ars_id = "23477" if dir_key == "hopyeong" else "23476"
         else:
             next_direction_label = "호평동·평내호평역 방면" if dir_key == "hopyeong" else "청량리·잠실·서울 방면"
 

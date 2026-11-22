@@ -445,6 +445,9 @@ async function initApp() {
 
     // 바텀 시트 스와이프/드래그 제스처 바인딩
     initSheetGestures();
+
+    // 두 손가락 핀치 줌 제스처 & 뷰포트 엔진 초기화
+    initPinchToZoomEngine();
   } catch (e) {
     console.error("App init error:", e);
   }
@@ -1133,6 +1136,157 @@ function initSheetGestures() {
     header.addEventListener("touchmove", onTouchMove, { passive: true });
     header.addEventListener("touchend", onTouchEnd, { passive: true });
   }
+}
+
+// ==========================================
+// 4-0. 두 손가락 핀치 줌(Pinch-to-Zoom) 엔진 (v1.4.6)
+// 모바일 브라우저 및 PWA 환경에서 자유로운 화면 확대/축소 지원
+// ==========================================
+let PageZoomState = {
+  scale: 1.0,
+  minScale: 1.0,
+  maxScale: 2.5,
+  isPinching: false,
+  startDistance: 0,
+  startScale: 1.0,
+  targetElement: null
+};
+
+function getTouchDistance(touches) {
+  if (!touches || touches.length < 2) return 0;
+  return Math.hypot(
+    touches[0].clientX - touches[1].clientX,
+    touches[0].clientY - touches[1].clientY
+  );
+}
+
+function updateZoomIndicator(scale) {
+  const indicator = document.getElementById("pinchZoomIndicator");
+  const textElem = document.getElementById("pinchZoomText");
+  if (!indicator || !textElem) return;
+
+  if (scale > 1.05) {
+    const percent = Math.round(scale * 100);
+    textElem.textContent = `🔍 화면 ${percent}%`;
+    indicator.style.display = "flex";
+  } else {
+    indicator.style.display = "none";
+  }
+}
+
+function applyPageZoom(scale, targetElem) {
+  const target = targetElem || document.querySelector(".app-container");
+  if (!target) return;
+
+  const clampedScale = Math.min(Math.max(scale, PageZoomState.minScale), PageZoomState.maxScale);
+  PageZoomState.scale = clampedScale;
+
+  if (clampedScale <= 1.02) {
+    target.style.transform = "none";
+    target.style.transformOrigin = "center top";
+    updateZoomIndicator(1.0);
+  } else {
+    target.style.transformOrigin = "center top";
+    target.style.transform = `scale(${clampedScale})`;
+    updateZoomIndicator(clampedScale);
+  }
+}
+
+function resetPageZoom() {
+  const container = document.querySelector(".app-container");
+  if (container) {
+    container.style.transition = "transform 0.25s ease";
+    container.style.transform = "none";
+    setTimeout(() => {
+      container.style.transition = "";
+    }, 250);
+  }
+
+  // 열려있는 바텀 시트/모달 내부 컨텐츠도 리셋
+  const openSheets = document.querySelectorAll(".sheet-content, .modal-content");
+  openSheets.forEach(sheet => {
+    sheet.style.transform = "none";
+  });
+
+  PageZoomState.scale = 1.0;
+  updateZoomIndicator(1.0);
+
+  // 네이티브 뷰포트 줌 리셋 시도 (iOS/Android 브라우저 100% 원복)
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (meta) {
+    meta.setAttribute("content", "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover");
+    setTimeout(() => {
+      meta.setAttribute("content", "width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=4.0, user-scalable=yes, viewport-fit=cover");
+    }, 150);
+  }
+}
+
+function initPinchToZoomEngine() {
+  // 1. 네이티브 visualViewport 줌 모니터링 (브라우저 자체 핀치 줌 감지 시 인디케이터 표시)
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", () => {
+      const vScale = window.visualViewport.scale;
+      if (vScale > 1.05) {
+        updateZoomIndicator(vScale);
+      } else if (PageZoomState.scale <= 1.05) {
+        updateZoomIndicator(1.0);
+      }
+    });
+  }
+
+  // 2. 모바일 터치 기반 핀치 제스처 엔진 (PWA 독립 실행 또는 네이티브 줌 억제 환경 대응)
+  let activeTarget = null;
+
+  document.addEventListener("touchstart", (e) => {
+    // 지도 터치 시(카카오맵/오픈스트리트맵) 지도 자체 타일 줌이 우선 동작하도록 바이패스
+    if (e.target.closest('#kakaoCategoryMap, #kakaoSafetyMap, .leaflet-container, [id*="Map"], [id*="map"]')) {
+      PageZoomState.isPinching = false;
+      return;
+    }
+
+    if (e.touches && e.touches.length === 2) {
+      PageZoomState.isPinching = true;
+      PageZoomState.startDistance = getTouchDistance(e.touches);
+      PageZoomState.startScale = PageZoomState.scale || 1.0;
+
+      // 현재 터치된 영역이 바텀 시트 내부인지, 메인 컨테이너인지 타겟 감지
+      const inSheet = e.target.closest(".sheet-content");
+      const inModal = e.target.closest(".modal-content");
+      activeTarget = inSheet || inModal || document.querySelector(".app-container");
+    }
+  }, { passive: true });
+
+  document.addEventListener("touchmove", (e) => {
+    if (!PageZoomState.isPinching || !e.touches || e.touches.length < 2) return;
+
+    // 지도 영역 내부 터치는 패스
+    if (e.target.closest('#kakaoCategoryMap, #kakaoSafetyMap, .leaflet-container, [id*="Map"], [id*="map"]')) {
+      return;
+    }
+
+    // 만약 브라우저 네이티브 visualViewport가 자체적으로 확대 중이라면 커스텀 scale은 중복 적용하지 않고 배율 표시만 갱신
+    if (window.visualViewport && window.visualViewport.scale > 1.05) {
+      updateZoomIndicator(window.visualViewport.scale);
+      return;
+    }
+
+    const currentDistance = getTouchDistance(e.touches);
+    if (PageZoomState.startDistance > 0 && currentDistance > 0) {
+      const factor = currentDistance / PageZoomState.startDistance;
+      const targetScale = PageZoomState.startScale * factor;
+      
+      // 약간의 감도 필터링
+      if (Math.abs(targetScale - PageZoomState.scale) > 0.02) {
+        applyPageZoom(targetScale, activeTarget);
+      }
+    }
+  }, { passive: true });
+
+  document.addEventListener("touchend", (e) => {
+    if (!e.touches || e.touches.length < 2) {
+      PageZoomState.isPinching = false;
+    }
+  }, { passive: true });
 }
 
 // ==========================================
@@ -4414,4 +4568,7 @@ window.focusRestaurantOnMap = focusRestaurantOnMap;
 window.selectBusStopOnMapById = selectBusStopOnMapById;
 window.showAllCategoryMarkers = showAllCategoryMarkers;
 window.refreshMyLocation = refreshMyLocation;
+window.initPinchToZoomEngine = initPinchToZoomEngine;
+window.applyPageZoom = applyPageZoom;
+window.resetPageZoom = resetPageZoom;
 

@@ -9,10 +9,10 @@
   "7": "app.js",
   "8": "family-care",
   "9": "manifest.json",
-  "10": "📌 목차",
-  "11": "get_family_locations",
+  "10": "get_station_arrivals",
+  "11": "loadFavorites",
   "12": "database.py",
-  "13": "refreshData",
+  "13": "database.py",
   "14": "showToastNotice",
   "15": "update_user_location",
   "16": "api_route",
@@ -24,5 +24,8 @@
   "22": "quickAddFavoritePlace",
   "23": "initSheetGestures",
   "24": "auth.py",
-  "25": "hospital.py"
+  "25": "hospital.py",
+  "26": "executeRestSearch",
+  "27": "initPinchToZoomEngine",
+  "28": "3) 조치 및 해결 내역 (Remediation)"
 }

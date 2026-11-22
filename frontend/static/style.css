@@ -1961,4 +1961,50 @@ body.large-text-mode .btn-secondary {
   min-height: 38px !important;
 }
 
+/* ==========================================
+ * 9. 두 손가락 핀치 줌(Pinch-to-Zoom) 엔진 UI
+ * ========================================== */
+.app-container {
+  transform-origin: center top;
+  will-change: transform;
+}
+
+.pinch-zoom-indicator {
+  position: fixed;
+  bottom: 84px;
+  right: 16px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #ffffff;
+  backdrop-filter: blur(8px);
+  padding: 7px 14px;
+  border-radius: 24px;
+  font-size: 12px;
+  font-weight: 800;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  transition: transform 0.15s ease, opacity 0.2s ease;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.pinch-zoom-indicator .zoom-reset-btn {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 800;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.pinch-zoom-indicator:active {
+  transform: scale(0.95);
+  background: rgba(15, 23, 42, 0.98);
+}
+
 

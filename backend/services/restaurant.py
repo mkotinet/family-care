@@ -2,8 +2,10 @@ import urllib.parse
 from datetime import datetime
 import zoneinfo
 from backend.config import KAKAO_REST_API_KEY, TIMEZONE
+from backend.coords import haversine_distance
 from backend.database import get_db_connection, get_cached_data, set_cached_data
 from backend.http_client import async_http_get_json
+from backend.services.location import reverse_geocode
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
@@ -132,18 +134,21 @@ async def search_places_kakao(query: str = "맛집", lat: float = 37.643421, lon
         except Exception:
             docs = []
 
-        # 만약 반경 내 결과가 0건이면 "남양주 " 또는 "평내 " 접두사 붙여서 재검색 시도
-        if not docs and not any(loc in clean_q for loc in ["평내", "호평", "남양주"]):
-            params["query"] = f"남양주 {clean_q}"
-            params.pop("radius", None) # 반경 제한 해제
-            params.pop("x", None)
-            params.pop("y", None)
-            query_str = urllib.parse.urlencode(params)
-            try:
-                data2 = await async_http_get_json(f"{url}?{query_str}", headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}, timeout=5.0)
-                docs = data2.get("documents", [])
-            except Exception:
-                pass
+        # 만약 반경 내 결과가 0건이면 현재 역지오코딩된 시/군/구 접두사를 붙여 재검색 시도
+        if not docs:
+            geo = await reverse_geocode(lat, lon)
+            area_prefix = geo.get("sigungu") or geo.get("dong") or geo.get("sido_short") or ""
+            if area_prefix and area_prefix not in clean_q:
+                params["query"] = f"{area_prefix} {clean_q}"
+                params.pop("radius", None)
+                params.pop("x", None)
+                params.pop("y", None)
+                query_str = urllib.parse.urlencode(params)
+                try:
+                    data2 = await async_http_get_json(f"{url}?{query_str}", headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}, timeout=5.0)
+                    docs = data2.get("documents", [])
+                except Exception:
+                    pass
 
         places = []
         now = datetime.now(KST)
@@ -153,7 +158,7 @@ async def search_places_kakao(query: str = "맛집", lat: float = 37.643421, lon
         for d in docs:
             d_x = float(d.get("x", lon))
             d_y = float(d.get("y", lat))
-            dist = int(d.get("distance", 0)) if d.get("distance") else 500
+            dist = int(d.get("distance", 0)) if d.get("distance") else int(haversine_distance(lat, lon, d_y, d_x))
             dist_str = f"{dist}m" if dist < 1000 else f"{round(dist/1000, 1)}km"
             places.append({
                 "id": d.get("id"),

@@ -3,10 +3,12 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime
 import zoneinfo
-from backend.config import DATA_GO_KR_API_KEY, TIMEZONE
+from backend.config import DATA_GO_KR_API_KEY, KAKAO_REST_API_KEY, TIMEZONE
+from backend.coords import haversine_distance
 from backend.database import get_cached_data, set_cached_data
-from backend.http_client import async_http_get_bytes
+from backend.http_client import async_http_get_bytes, async_http_get_json
 from backend.mock_data import get_simulated_hospitals
+from backend.services.location import reverse_geocode
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
@@ -80,13 +82,106 @@ def format_time_str(val):
         return ""
     return f"{val[:2]}:{val[2:]}"
 
+def _fmt_dist(dist_m: int) -> str:
+    if dist_m < 1000:
+        return f"{dist_m}m"
+    return f"{round(dist_m / 1000, 1)}km"
+
+def _norm_name(name: str) -> str:
+    return (name or "").replace(" ", "").replace("(", "").replace(")", "").strip().lower()
+
+def _parse_egen_xml(raw_bytes, day_idx: int, now_hm: str, is_pharmacy: bool) -> list:
+    if not isinstance(raw_bytes, (bytes, bytearray)):
+        return []
+    parsed = []
+    try:
+        root = ET.fromstring(raw_bytes)
+        for it in root.findall(".//item"):
+            name = (it.findtext("dutyName") or "").strip()
+            if not name:
+                continue
+            addr = (it.findtext("dutyAddr") or "").strip()
+            tel = (it.findtext("dutyTel1") or "").strip()
+            today_s = it.findtext(f"dutyTime{day_idx}s")
+            today_c = it.findtext(f"dutyTime{day_idx}c")
+            sat_s = it.findtext("dutyTime6s")
+            sat_c = it.findtext("dutyTime6c")
+            sun_s = it.findtext("dutyTime7s")
+            sun_c = it.findtext("dutyTime7c")
+
+            has_today = bool(today_s and today_c)
+            is_open_now = _is_open_between(now_hm, today_s, today_c) if has_today else False
+
+            weekend_txt = []
+            if sat_s and sat_c:
+                weekend_txt.append(f"토 {format_time_str(sat_s)}~{format_time_str(sat_c)}")
+            if sun_s and sun_c:
+                weekend_txt.append(f"일 {format_time_str(sun_s)}~{format_time_str(sun_c)}")
+            weekend_info = " / ".join(weekend_txt) if weekend_txt else ("주말 휴무" if is_pharmacy else "주말 휴진")
+
+            if is_pharmacy:
+                badge = "일요·심야약국" if (sun_s and sun_c) else ("토요영업" if (sat_s and sat_c) else "평일영업")
+                badge_color = "#10b981" if (sun_s and sun_c) else "#64748b"
+                status_badge = f"🟢 영업중 ({format_time_str(today_c)} 마감)" if is_open_now else ("🔴 영업종료" if has_today else "⚪ 오늘 휴무")
+                today_hours = f"{format_time_str(today_s)} ~ {format_time_str(today_c)}" if has_today else "오늘 휴무"
+            else:
+                badge = "달빛어린이병원" if ("달빛" in name or (sun_s and int(sun_c or 0) >= 1800)) else "소아청소년과"
+                badge_color = "#ec4899" if badge == "달빛어린이병원" else "#3b82f6"
+                status_badge = f"🟢 진료중 ({format_time_str(today_c)} 마감)" if is_open_now else ("🔴 진료종료" if has_today else "⚪ 오늘 휴진")
+                today_hours = f"{format_time_str(today_s)} ~ {format_time_str(today_c)}" if has_today else "오늘 휴진"
+
+            x_lat, x_lon = None, None
+            try:
+                lat_txt = it.findtext("wgs84Lat")
+                lon_txt = it.findtext("wgs84Lon")
+                if lat_txt and lon_txt:
+                    fv_lat, fv_lon = float(lat_txt), float(lon_txt)
+                    if 33.0 <= fv_lat <= 39.0 and 124.0 <= fv_lon <= 132.0:
+                        x_lat, x_lon = fv_lat, fv_lon
+            except Exception:
+                pass
+
+            parsed.append({
+                "id": f"{'p' if is_pharmacy else 'h'}_{it.findtext('hpid') or name}",
+                "name": name,
+                "norm_name": _norm_name(name),
+                "type": "약국" if is_pharmacy else "소아과/병원",
+                "badge": badge,
+                "badge_color": badge_color,
+                "address": addr,
+                "phone": tel,
+                "today_hours": today_hours,
+                "weekend_info": weekend_info,
+                "is_open_now": is_open_now,
+                "status_badge": status_badge,
+                "is_weekend_open": bool(sat_s or sun_s),
+                "lat": x_lat,
+                "lon": x_lon,
+            })
+    except Exception:
+        pass
+    return parsed
+
 async def get_hospital_pharmacy_info(lat: float, lon: float, filter_type: str = "ALL"):
-    cache_key = f"hospitals_real_v2_{filter_type}_{round(lat, 2)}_{round(lon, 2)}"
+    cache_key = f"hospitals_real_v3_{filter_type}_{round(lat, 3)}_{round(lon, 3)}"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
 
-    if not DATA_GO_KR_API_KEY:
+    now = datetime.now(KST)
+    weekday = now.weekday()  # 0:월 ~ 6:일
+    is_weekend = weekday >= 5
+    now_hm = now.strftime("%H%M")
+    day_idx = weekday + 1  # E-Gen 진료시간 인덱스: 1(월)~7(일)
+
+    geo = await reverse_geocode(lat, lon)
+    sido = geo.get("sido") or "경기도"
+    sigungu = geo.get("sigungu") or "남양주시"
+    dong = geo.get("dong") or ""
+    short_label = geo.get("short_label") or "현재 위치"
+    dong_prefix = dong[:-1] if len(dong) >= 2 and dong.endswith(("동", "읍", "면")) else dong
+
+    if not DATA_GO_KR_API_KEY and not KAKAO_REST_API_KEY:
         base_data = get_simulated_hospitals()
         items = base_data.get("items", [])
         if filter_type == "PHARMACY":
@@ -95,166 +190,239 @@ async def get_hospital_pharmacy_info(lat: float, lon: float, filter_type: str = 
             items = [x for x in items if "소아" in x["type"] or x.get("badge") == "달빛어린이병원"]
         elif filter_type == "OPEN_NOW":
             items = [x for x in items if x.get("is_open_now")]
-        result = {"summary": base_data["summary"], "is_weekend": base_data["is_weekend"], "filter": filter_type, "items": items}
-        set_cached_data(cache_key, result, ttl_seconds=900)
+        result = {"summary": f"{short_label} 인근 병원·약국 현황", "region_label": short_label, "is_weekend": is_weekend, "filter": filter_type, "items": items}
+        set_cached_data(cache_key, result, ttl_seconds=600)
         return result
 
-    now = datetime.now(KST)
-    weekday = now.weekday()  # 0:월, 1:화, 2:수, 3:목, 4:금, 5:토, 6:일
-    is_weekend = weekday >= 5
-    now_hm = now.strftime("%H%M")
-    day_idx = weekday + 1  # E-Gen 진료시간 인덱스: 1(월)~7(일)
-
-    items = []
-
     try:
-        # 1. 약국 조회 (평내동)
-        pharm_url = "https://apis.data.go.kr/B552657/ErmctInsttInfoInqireService/getParmacyListInfoInqire"
-        p_params = {
-            "serviceKey": DATA_GO_KR_API_KEY,
-            "Q0": "경기도",
-            "Q1": "남양주시",
-            "QN": "평내",
-            "pageNo": "1",
-            "numOfRows": "10"
-        }
-        p_full_url = f"{pharm_url}?{urllib.parse.urlencode(p_params)}"
-        hosp_url = "https://apis.data.go.kr/B552657/HsptlAsembySearchService/getHsptlMdcncListInfoInqire"
-        h_params = {
-            "serviceKey": DATA_GO_KR_API_KEY,
-            "Q0": "경기도",
-            "Q1": "남양주시",
-            "QN": "소아",
-            "pageNo": "1",
-            "numOfRows": "10"
-        }
-        h_full_url = f"{hosp_url}?{urllib.parse.urlencode(h_params)}"
+        headers_kakao = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"} if KAKAO_REST_API_KEY else {}
 
-        # 약국 + 소아과/병의원 E-Gen API 비블로킹 병렬 동시 호출
-        p_raw, h_raw = await asyncio.gather(
-            async_http_get_bytes(p_full_url, timeout=5.0),
-            async_http_get_bytes(h_full_url, timeout=5.0),
+        async def _kakao_cat(cat_code: str, radius: int = 3000, size: int = 15):
+            if not KAKAO_REST_API_KEY:
+                return []
+            url = "https://dapi.kakao.com/v2/local/search/category.json"
+            params = {
+                "category_group_code": cat_code,
+                "x": str(lon),
+                "y": str(lat),
+                "radius": radius,
+                "size": size,
+                "sort": "distance",
+            }
+            data = await async_http_get_json(f"{url}?{urllib.parse.urlencode(params)}", headers=headers_kakao, timeout=4.0)
+            return data.get("documents", [])
+
+        async def _kakao_keyword(kw: str, radius: int = 4000, size: int = 12):
+            if not KAKAO_REST_API_KEY:
+                return []
+            url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+            params = {
+                "query": kw,
+                "category_group_code": "HP8",
+                "x": str(lon),
+                "y": str(lat),
+                "radius": radius,
+                "size": size,
+                "sort": "distance",
+            }
+            data = await async_http_get_json(f"{url}?{urllib.parse.urlencode(params)}", headers=headers_kakao, timeout=4.0)
+            return data.get("documents", [])
+
+        async def _egen_pharm():
+            if not DATA_GO_KR_API_KEY:
+                return None
+            pharm_url = "https://apis.data.go.kr/B552657/ErmctInsttInfoInqireService/getParmacyListInfoInqire"
+            p_params = {
+                "serviceKey": DATA_GO_KR_API_KEY,
+                "Q0": sido,
+                "Q1": sigungu,
+                "pageNo": "1",
+                "numOfRows": "25",
+            }
+            if dong_prefix:
+                p_params["QN"] = dong_prefix
+            return await async_http_get_bytes(f"{pharm_url}?{urllib.parse.urlencode(p_params)}", timeout=4.5)
+
+        async def _egen_hosp():
+            if not DATA_GO_KR_API_KEY:
+                return None
+            hosp_url = "https://apis.data.go.kr/B552657/HsptlAsembySearchService/getHsptlMdcncListInfoInqire"
+            h_params = {
+                "serviceKey": DATA_GO_KR_API_KEY,
+                "Q0": sido,
+                "Q1": sigungu,
+                "QN": "소아",
+                "pageNo": "1",
+                "numOfRows": "20",
+            }
+            return await async_http_get_bytes(f"{hosp_url}?{urllib.parse.urlencode(h_params)}", timeout=4.5)
+
+        # 카카오 로컬(전국 실좌표/거리) + E-Gen(진료시간/당번) 5개 비블로킹 병렬 동시 호출
+        k_pharm_docs, k_hosp_docs, k_pedia_docs, p_raw, h_raw = await asyncio.gather(
+            _kakao_cat("PM9", 3000, 15),
+            _kakao_cat("HP8", 3000, 15),
+            _kakao_keyword("소아청소년과", 4500, 12),
+            _egen_pharm(),
+            _egen_hosp(),
             return_exceptions=True,
         )
 
-        if isinstance(p_raw, (bytes, bytearray)):
-            root = ET.fromstring(p_raw)
-            for it in root.findall(".//item"):
-                name = it.findtext("dutyName")
-                addr = it.findtext("dutyAddr")
-                tel = it.findtext("dutyTel1") or "전화번호 없음"
+        k_pharm_docs = k_pharm_docs if isinstance(k_pharm_docs, list) else []
+        k_hosp_docs = k_hosp_docs if isinstance(k_hosp_docs, list) else []
+        k_pedia_docs = k_pedia_docs if isinstance(k_pedia_docs, list) else []
 
-                today_s = it.findtext(f"dutyTime{day_idx}s")
-                today_c = it.findtext(f"dutyTime{day_idx}c")
-                sat_s = it.findtext("dutyTime6s")
-                sat_c = it.findtext("dutyTime6c")
-                sun_s = it.findtext("dutyTime7s")
-                sun_c = it.findtext("dutyTime7c")
+        egen_pharms = _parse_egen_xml(p_raw, day_idx, now_hm, is_pharmacy=True)
+        egen_hosps = _parse_egen_xml(h_raw, day_idx, now_hm, is_pharmacy=False)
 
-                has_today = bool(today_s and today_c)
-                is_open_now = _is_open_between(now_hm, today_s, today_c) if has_today else False
+        egen_map = {}
+        for eg in (egen_pharms + egen_hosps):
+            egen_map[eg["norm_name"]] = eg
 
-                weekend_txt = []
-                if sat_s and sat_c:
-                    weekend_txt.append(f"토 {format_time_str(sat_s)}~{format_time_str(sat_c)}")
-                if sun_s and sun_c:
-                    weekend_txt.append(f"일 {format_time_str(sun_s)}~{format_time_str(sun_c)}")
-                weekend_info = " / ".join(weekend_txt) if weekend_txt else "주말 휴무"
+        def _find_egen_match(name: str):
+            nn = _norm_name(name)
+            if nn in egen_map:
+                return egen_map[nn]
+            for k, v in egen_map.items():
+                if len(k) >= 3 and (k in nn or nn in k):
+                    return v
+            return None
 
-                badge = "일요·심야약국" if (sun_s and sun_c) else ("토요영업" if (sat_s and sat_c) else "평일영업")
-                status_badge = f"🟢 영업중 ({format_time_str(today_c)} 마감)" if is_open_now else ("🔴 영업종료" if has_today else "⚪ 오늘 휴무")
+        # 일반 영업시간 추정 (E-Gen 미매칭 시 평일 주간 여부 표시)
+        default_open_est = (not is_weekend and "0900" <= now_hm <= "1800") or (weekday == 5 and "0900" <= now_hm <= "1300")
 
-                p_lat, p_lon = resolve_hospital_coords(name, addr, it.findtext("wgs84Lat"), it.findtext("wgs84Lon"), len(items))
+        merged = {}
 
-                items.append({
-                    "id": f"p_{it.findtext('hpid') or name}",
-                    "name": name,
-                    "type": "약국",
-                    "badge": badge,
-                    "badge_color": "#10b981" if (sun_s and sun_c) else "#64748b",
-                    "address": addr,
-                    "phone": tel,
-                    "distance": "평내동 중심부 (도보 5~10분)",
-                    "today_hours": f"{format_time_str(today_s)} ~ {format_time_str(today_c)}" if has_today else "오늘 휴무",
-                    "weekend_info": weekend_info,
-                    "is_open_now": is_open_now,
-                    "status_badge": status_badge,
-                    "is_weekend_open": bool(sat_s or sun_s),
-                    "lat": p_lat,
-                    "lon": p_lon,
-                    "latitude": p_lat,
-                    "longitude": p_lon
-                })
+        def _add_kakao_doc(d: dict, is_pharm: bool, force_pedia: bool = False):
+            name = (d.get("place_name") or "").strip()
+            if not name:
+                return
+            nn = _norm_name(name)
+            if nn in merged:
+                return
+            try:
+                p_lat = float(d.get("y"))
+                p_lon = float(d.get("x"))
+            except Exception:
+                return
+            dist_m = int(d.get("distance")) if d.get("distance") else int(haversine_distance(lat, lon, p_lat, p_lon))
+            cat_full = d.get("category_name") or ""
+            cat_leaf = cat_full.split(">")[-1].strip() if ">" in cat_full else cat_full.strip()
+            is_child_hosp = force_pedia or ("소아" in name) or ("소아" in cat_full) or ("달빛" in name) or ("어린이" in name)
 
-        if isinstance(h_raw, (bytes, bytearray)):
-            root = ET.fromstring(h_raw)
-            for it in root.findall(".//item"):
-                name = it.findtext("dutyName")
-                addr = it.findtext("dutyAddr")
-                tel = it.findtext("dutyTel1") or "전화번호 없음"
+            eg = _find_egen_match(name)
+            if eg:
+                badge = eg["badge"]
+                badge_color = eg["badge_color"]
+                today_hours = eg["today_hours"]
+                weekend_info = eg["weekend_info"]
+                is_open_now = eg["is_open_now"]
+                status_badge = eg["status_badge"]
+                is_weekend_open = eg["is_weekend_open"]
+            else:
+                if is_pharm:
+                    badge = "인근 약국"
+                    badge_color = "#10b981"
+                    today_hours = "방문 전 전화 확인 권장"
+                    weekend_info = "토·일 영업 여부 전화 확인"
+                    is_open_now = default_open_est
+                    status_badge = "🟢 영업시간대 (확인 권장)" if is_open_now else "⚪ 영업시간 전화 확인"
+                    is_weekend_open = False
+                else:
+                    badge = "달빛어린이병원" if "달빛" in name else ("소아청소년과" if is_child_hosp else (cat_leaf or "병의원"))
+                    badge_color = "#ec4899" if "달빛" in name else ("#3b82f6" if is_child_hosp else "#0ea5e9")
+                    today_hours = "방문 전 전화 확인 권장"
+                    weekend_info = "주말 진료 여부 전화 확인"
+                    is_open_now = default_open_est
+                    status_badge = "🟢 진료시간대 (확인 권장)" if is_open_now else "⚪ 진료시간 전화 확인"
+                    is_weekend_open = False
 
-                today_s = it.findtext(f"dutyTime{day_idx}s")
-                today_c = it.findtext(f"dutyTime{day_idx}c")
-                sat_s = it.findtext("dutyTime6s")
-                sat_c = it.findtext("dutyTime6c")
-                sun_s = it.findtext("dutyTime7s")
-                sun_c = it.findtext("dutyTime7c")
+            item_type = "약국" if is_pharm else ("소아과/병원" if is_child_hosp else (cat_leaf or "병원"))
+            merged[nn] = {
+                "id": f"k_{d.get('id') or nn}",
+                "name": name,
+                "type": item_type,
+                "is_children": is_child_hosp,
+                "badge": badge,
+                "badge_color": badge_color,
+                "address": d.get("road_address_name") or d.get("address_name") or "",
+                "phone": d.get("phone") or (eg["phone"] if eg else ""),
+                "distance": _fmt_dist(dist_m),
+                "distance_meters": dist_m,
+                "today_hours": today_hours,
+                "weekend_info": weekend_info,
+                "is_open_now": is_open_now,
+                "status_badge": status_badge,
+                "is_weekend_open": is_weekend_open,
+                "place_url": d.get("place_url") or "",
+                "lat": p_lat,
+                "lon": p_lon,
+                "latitude": p_lat,
+                "longitude": p_lon,
+            }
 
-                has_today = bool(today_s and today_c)
-                is_open_now = _is_open_between(now_hm, today_s, today_c) if has_today else False
+        for d in k_pharm_docs:
+            _add_kakao_doc(d, is_pharm=True)
+        for d in k_pedia_docs:
+            _add_kakao_doc(d, is_pharm=False, force_pedia=True)
+        for d in k_hosp_docs:
+            _add_kakao_doc(d, is_pharm=False)
 
-                weekend_txt = []
-                if sat_s and sat_c:
-                    weekend_txt.append(f"토 {format_time_str(sat_s)}~{format_time_str(sat_c)}")
-                if sun_s and sun_c:
-                    weekend_txt.append(f"일 {format_time_str(sun_s)}~{format_time_str(sun_c)}")
-                weekend_info = " / ".join(weekend_txt) if weekend_txt else "주말 휴진"
+        # E-Gen 항목 중 카카오 Top N에 없지만 실제 좌표가 5km 이내인 당번약국/달빛어린이병원 보강
+        for eg in (egen_pharms + egen_hosps):
+            nn = eg["norm_name"]
+            if nn in merged:
+                continue
+            if eg["lat"] is None or eg["lon"] is None:
+                continue
+            dist_m = int(haversine_distance(lat, lon, eg["lat"], eg["lon"]))
+            if dist_m > 5000:
+                continue
+            merged[nn] = {
+                "id": eg["id"],
+                "name": eg["name"],
+                "type": eg["type"],
+                "is_children": ("소아" in eg["type"] or "소아" in eg["name"] or eg["badge"] == "달빛어린이병원"),
+                "badge": eg["badge"],
+                "badge_color": eg["badge_color"],
+                "address": eg["address"],
+                "phone": eg["phone"],
+                "distance": _fmt_dist(dist_m),
+                "distance_meters": dist_m,
+                "today_hours": eg["today_hours"],
+                "weekend_info": eg["weekend_info"],
+                "is_open_now": eg["is_open_now"],
+                "status_badge": eg["status_badge"],
+                "is_weekend_open": eg["is_weekend_open"],
+                "place_url": "",
+                "lat": eg["lat"],
+                "lon": eg["lon"],
+                "latitude": eg["lat"],
+                "longitude": eg["lon"],
+            }
 
-                badge = "달빛어린이병원" if ("달빛" in (name or "") or (sun_s and int(sun_c or 0) >= 1800)) else "소아청소년과"
-                status_badge = f"🟢 진료중 ({format_time_str(today_c)} 마감)" if is_open_now else ("🔴 진료종료" if has_today else "⚪ 오늘 휴진")
-
-                h_lat, h_lon = resolve_hospital_coords(name, addr, it.findtext("wgs84Lat"), it.findtext("wgs84Lon"), len(items))
-
-                items.append({
-                    "id": f"h_{it.findtext('hpid') or name}",
-                    "name": name,
-                    "type": "소아과/병원",
-                    "badge": badge,
-                    "badge_color": "#ec4899" if badge == "달빛어린이병원" else "#3b82f6",
-                    "address": addr,
-                    "phone": tel,
-                    "distance": "남양주시 관내 (차량 5~15분)",
-                    "today_hours": f"{format_time_str(today_s)} ~ {format_time_str(today_c)}" if has_today else "오늘 휴진",
-                    "weekend_info": weekend_info,
-                    "is_open_now": is_open_now,
-                    "status_badge": status_badge,
-                    "is_weekend_open": bool(sat_s or sun_s),
-                    "lat": h_lat,
-                    "lon": h_lon,
-                    "latitude": h_lat,
-                    "longitude": h_lon
-                })
+        items = sorted(merged.values(), key=lambda x: x["distance_meters"])
 
         # 필터링 적용
         filtered_items = items
         if filter_type == "PHARMACY":
             filtered_items = [x for x in items if x["type"] == "약국"]
         elif filter_type == "CHILDREN":
-            filtered_items = [x for x in items if "소아" in x["type"] or x["badge"] == "달빛어린이병원"]
+            filtered_items = [x for x in items if x.get("is_children") or "소아" in x["type"] or x["badge"] == "달빛어린이병원"]
         elif filter_type == "OPEN_NOW":
             filtered_items = [x for x in items if x["is_open_now"]]
 
         result = {
-            "summary": "평내유진마젤란 인근 실시간 병원·약국 현황 (국립중앙의료원 공공데이터 연동)",
+            "summary": f"{short_label} 인근 실시간 병원·약국 현황 (카카오 로컬 + 국립중앙의료원 연동)",
+            "region_label": short_label,
             "is_weekend": is_weekend,
             "filter": filter_type,
-            "items": filtered_items
+            "items": filtered_items[:30]
         }
 
         set_cached_data(cache_key, result, ttl_seconds=600)
         return result
 
-    except Exception as e:
+    except Exception:
         base_data = get_simulated_hospitals()
         b_items = base_data.get("items", [])
         if filter_type == "PHARMACY":
@@ -264,7 +432,8 @@ async def get_hospital_pharmacy_info(lat: float, lon: float, filter_type: str = 
         elif filter_type == "OPEN_NOW":
             b_items = [x for x in b_items if x.get("is_open_now")]
         return {
-            "summary": base_data["summary"],
+            "summary": f"{short_label} 인근 병원·약국 현황",
+            "region_label": short_label,
             "is_weekend": is_weekend,
             "filter": filter_type,
             "items": b_items

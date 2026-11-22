@@ -1,11 +1,144 @@
+import asyncio
 from datetime import datetime
 import zoneinfo
 from backend.config import KAKAO_REST_API_KEY, TIMEZONE, DEFAULT_LOCATION
-from backend.database import get_db_connection
+from backend.database import get_db_connection, get_cached_data, set_cached_data
 from backend.coords import haversine_distance
 from backend.http_client import async_http_get_json
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
+
+SIDO_TO_AIRKOREA = {
+    "서울특별시": "서울", "서울": "서울",
+    "부산광역시": "부산", "부산": "부산",
+    "대구광역시": "대구", "대구": "대구",
+    "인천광역시": "인천", "인천": "인천",
+    "광주광역시": "광주", "광주": "광주",
+    "대전광역시": "대전", "대전": "대전",
+    "울산광역시": "울산", "울산": "울산",
+    "세종특별자치시": "세종", "세종": "세종",
+    "경기도": "경기", "경기": "경기",
+    "강원특별자치도": "강원", "강원도": "강원", "강원": "강원",
+    "충청북도": "충북", "충북": "충북",
+    "충청남도": "충남", "충남": "충남",
+    "전북특별자치도": "전북", "전라북도": "전북", "전북": "전북",
+    "전라남도": "전남", "전남": "전남",
+    "경상북도": "경북", "경북": "경북",
+    "경상남도": "경남", "경남": "경남",
+    "제주특별자치도": "제주", "제주": "제주",
+}
+
+def _normalize_sido_short(sido: str) -> str:
+    if not sido:
+        return "경기"
+    if sido in SIDO_TO_AIRKOREA:
+        return SIDO_TO_AIRKOREA[sido]
+    for k, v in SIDO_TO_AIRKOREA.items():
+        if k.startswith(sido[:2]) or sido.startswith(v):
+            return v
+    return "경기"
+
+async def reverse_geocode(lat: float, lon: float) -> dict:
+    """
+    WGS84 좌표를 카카오 REST API로 행정구역/도로명 주소로 변환 (전국 지원, 30분 캐시)
+    """
+    home_dist = int(haversine_distance(lat, lon, DEFAULT_LOCATION["lat"], DEFAULT_LOCATION["lon"]))
+    is_near_home = home_dist <= 250
+
+    cache_key = f"rev_geo_v1_{round(lat, 3)}_{round(lon, 3)}"
+    cached = get_cached_data(cache_key)
+    if cached:
+        res = dict(cached)
+        res["lat"] = lat
+        res["lon"] = lon
+        res["is_near_home"] = is_near_home
+        res["home_distance_m"] = home_dist
+        return res
+
+    sido = "경기도" if is_near_home else ""
+    sigungu = "남양주시" if is_near_home else ""
+    dong = "평내동" if is_near_home else ""
+    building_name = "평내마젤란21" if is_near_home else ""
+    full_address = DEFAULT_LOCATION.get("address") or DEFAULT_LOCATION.get("name") or "경기도 남양주시 평내로 89" if is_near_home else f"위도 {round(lat, 4)}, 경도 {round(lon, 4)}"
+
+    if KAKAO_REST_API_KEY:
+        headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
+        region_url = f"https://dapi.kakao.com/v2/local/geo/coord2regioncode.json?x={lon}&y={lat}"
+        addr_url = f"https://dapi.kakao.com/v2/local/geo/coord2address.json?x={lon}&y={lat}"
+        region_res, addr_res = await asyncio.gather(
+            async_http_get_json(region_url, headers=headers, timeout=3.5),
+            async_http_get_json(addr_url, headers=headers, timeout=3.5),
+            return_exceptions=True,
+        )
+
+        if isinstance(region_res, dict):
+            docs = region_res.get("documents") or []
+            # 행정동(H) 우선, 없으면 법정동(B)
+            picked = next((d for d in docs if d.get("region_type") == "H"), None) or (docs[0] if docs else None)
+            if picked:
+                sido = picked.get("region_1depth_name") or sido
+                sigungu = picked.get("region_2depth_name") or sigungu
+                dong = picked.get("region_3depth_name") or dong
+                if picked.get("address_name"):
+                    full_address = picked.get("address_name")
+
+        if isinstance(addr_res, dict):
+            a_docs = addr_res.get("documents") or []
+            if a_docs:
+                road = a_docs[0].get("road_address")
+                jibun = a_docs[0].get("address")
+                if road:
+                    full_address = road.get("address_name") or full_address
+                    if road.get("building_name"):
+                        building_name = road.get("building_name")
+                    if not sido:
+                        sido = road.get("region_1depth_name") or sido
+                    if not sigungu:
+                        sigungu = road.get("region_2depth_name") or sigungu
+                    if not dong:
+                        dong = road.get("region_3depth_name") or dong
+                elif jibun:
+                    full_address = jibun.get("address_name") or full_address
+                    if not sido:
+                        sido = jibun.get("region_1depth_name") or sido
+                    if not sigungu:
+                        sigungu = jibun.get("region_2depth_name") or sigungu
+                    if not dong:
+                        dong = jibun.get("region_3depth_name") or dong
+
+    sido_short = _normalize_sido_short(sido)
+    short_parts = [p for p in [sigungu, dong] if p]
+    if not short_parts and sido:
+        short_parts = [sido]
+    short_label = " ".join(short_parts) if short_parts else "현재 위치"
+
+    if is_near_home:
+        display_name = "남양주시 평내동 (우리 집)"
+    elif sido_short in ("서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종"):
+        display_name = f"{sido_short} {short_label}".strip()
+        if building_name and len(building_name) <= 14:
+            display_name = f"{display_name} · {building_name}"
+    else:
+        display_name = short_label
+        if building_name and len(building_name) <= 14:
+            display_name = f"{display_name} · {building_name}"
+
+    result = {
+        "lat": lat,
+        "lon": lon,
+        "sido": sido or "경기도",
+        "sido_short": sido_short,
+        "sigungu": sigungu,
+        "dong": dong,
+        "building_name": building_name,
+        "full_address": full_address,
+        "short_label": short_label,
+        "display_name": display_name,
+        "is_near_home": is_near_home,
+        "home_distance_m": home_dist,
+    }
+    set_cached_data(cache_key, result, ttl_seconds=1800)
+    return result
 
 # 가족 주요 안심 거점 (지오펜스)
 SAFE_ZONES = [
@@ -40,18 +173,13 @@ async def update_user_location(username: str, lat: float, lon: float, accuracy: 
     now_kst = now_kst_dt.strftime("%Y-%m-%d %H:%M:%S")
 
     landmark = custom_landmark or determine_landmark(lat, lon)
-    address = "경기도 남양주시 평내동"
+    address = "위치 확인 중"
 
-    # 카카오 좌표계 변환 및 상세 주소 조회 (비블로킹)
-    if KAKAO_REST_API_KEY and lat is not None and lon is not None:
+    # 카카오 좌표계 변환 및 상세 주소 조회 (공통 reverse_geocode 활용)
+    if lat is not None and lon is not None:
         try:
-            url = f"https://dapi.kakao.com/v2/local/geo/coord2address.json?x={lon}&y={lat}"
-            res_data = await async_http_get_json(url, headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}, timeout=3.0)
-            docs = res_data.get("documents", [])
-            if docs:
-                road = docs[0].get("road_address")
-                jibun = docs[0].get("address")
-                address = (road.get("address_name") if road else (jibun.get("address_name") if jibun else address))
+            geo = await reverse_geocode(lat, lon)
+            address = geo.get("full_address") or geo.get("display_name") or address
         except Exception:
             pass
 

@@ -1,18 +1,75 @@
+import asyncio
 import urllib.parse
 from datetime import datetime
 import zoneinfo
-from backend.config import DATA_GO_KR_API_KEY, KAKAO_REST_API_KEY, TIMEZONE
+from backend.config import DATA_GO_KR_API_KEY, KAKAO_REST_API_KEY, TIMEZONE, DEFAULT_LOCATION
+from backend.coords import haversine_distance
 from backend.database import get_db_connection, get_cached_data, set_cached_data, delete_cached_data
 from backend.http_client import async_http_get_json
 from backend.mock_data import get_simulated_transit
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
+async def _fetch_tago_nearby_stops(lat: float, lon: float) -> list:
+    """국토교통부 TAGO 좌표 기반 근접 정류소 조회 (전국 지원)"""
+    if not DATA_GO_KR_API_KEY:
+        return []
+    try:
+        url = "https://apis.data.go.kr/1613000/BusSttnInfoInqireService/getCrdntPrxmtSttnList"
+        params = {
+            "serviceKey": DATA_GO_KR_API_KEY,
+            "gpsLati": f"{lat:.6f}",
+            "gpsLong": f"{lon:.6f}",
+            "numOfRows": "15",
+            "pageNo": "1",
+            "_type": "json",
+        }
+        data = await async_http_get_json(f"{url}?{urllib.parse.urlencode(params)}", timeout=4.0)
+        items = data.get("response", {}).get("body", {}).get("items", {})
+        if isinstance(items, dict):
+            items = items.get("item", [])
+        if isinstance(items, dict):
+            items = [items]
+        if not isinstance(items, list):
+            return []
+        out = []
+        for it in items:
+            try:
+                s_lat = float(it.get("gpslati"))
+                s_lon = float(it.get("gpslong"))
+            except Exception:
+                continue
+            nodenm = str(it.get("nodenm") or "").strip()
+            if not nodenm:
+                continue
+            nodeid = str(it.get("nodeid") or "")
+            citycode = str(it.get("citycode") or "")
+            nodeno = str(it.get("nodeno") or "")
+            out.append({
+                "id": nodeid or nodeno or nodenm,
+                "node_id": nodeid,
+                "city_code": citycode,
+                "ars_id": nodeno,
+                "name": nodenm,
+                "full_name": f"{nodenm} ({nodeno})" if nodeno else nodenm,
+                "address": "",
+                "latitude": s_lat,
+                "longitude": s_lon,
+                "direction": "local",
+                "is_curated_pyeongnae": False,
+            })
+        return out
+    except Exception:
+        return []
+
 async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
-    cache_key = f"bus_stops_v6_{round(lat, 3)}_{round(lon, 3)}"
+    cache_key = f"bus_stops_v8_{round(lat, 3)}_{round(lon, 3)}"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
+
+    home_dist = haversine_distance(lat, lon, DEFAULT_LOCATION["lat"], DEFAULT_LOCATION["lon"])
+    is_pyeongnae_area = home_dist <= 3000
 
     # 평내·호평 핵심 거점 정류소 12대 기본 탑재 (카카오버스 맵 실측 좌표 및 공식 명칭·양방향 ARS-ID 100% 일치)
     core_stops = [
@@ -175,60 +232,119 @@ async def search_nearby_bus_stops(lat: float, lon: float, radius: int = 1500):
     ]
 
     stops_dict = {}
-    for s in core_stops:
-        key = f"{s['name']}_{s['id']}"
-        stops_dict[key] = dict(s)
+    if is_pyeongnae_area:
+        for s in core_stops:
+            item = dict(s)
+            item["is_curated_pyeongnae"] = True
+            item["city_code"] = "31130"
+            key = f"{item['name']}_{item['id']}"
+            stops_dict[key] = item
 
-    if KAKAO_REST_API_KEY:
-        try:
-            url = "https://dapi.kakao.com/v2/local/search/keyword.json"
-            params = {
-                "query": "버스정류장",
-                "x": str(lon),
-                "y": str(lat),
-                "radius": radius,
-                "size": 15,
-                "sort": "distance"
-            }
-            data = await async_http_get_json(
-                f"{url}?{urllib.parse.urlencode(params)}",
-                headers={"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"},
-                timeout=4.0,
-            )
-            for d in data.get("documents", []):
-                raw_name = d.get("place_name").replace(" 버스정류장", "").replace(" 정류소", "").strip()
-                if raw_name not in stops_dict:
-                    stops_dict[raw_name] = {
-                        "id": d.get("id"),
-                        "name": raw_name,
-                        "full_name": d.get("place_name"),
-                        "address": d.get("road_address_name") or d.get("address_name"),
-                        "latitude": float(d.get("y")),
-                        "longitude": float(d.get("x")),
-                        "direction": "hopyeong",
-                        "distance": int(d.get("distance", 0))
-                    }
-        except Exception:
-            pass
+    # 카카오 로컬 교통시설(지하철역 SW8 + 환승센터/버스터미널) + TAGO 좌표 근접 정류소 병렬 조회
+    async def _fetch_kakao_transit_stops():
+        if not KAKAO_REST_API_KEY:
+            return []
+        headers = {"Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"}
+        sw_url = "https://dapi.kakao.com/v2/local/search/category.json?" + urllib.parse.urlencode({
+            "category_group_code": "SW8",
+            "x": str(lon),
+            "y": str(lat),
+            "radius": max(radius, 2500),
+            "size": 10,
+            "sort": "distance",
+        })
+        hub_url = "https://dapi.kakao.com/v2/local/search/keyword.json?" + urllib.parse.urlencode({
+            "query": "환승센터",
+            "x": str(lon),
+            "y": str(lat),
+            "radius": max(radius, 2500),
+            "size": 5,
+            "sort": "distance",
+        })
+        term_url = "https://dapi.kakao.com/v2/local/search/keyword.json?" + urllib.parse.urlencode({
+            "query": "버스터미널",
+            "x": str(lon),
+            "y": str(lat),
+            "radius": max(radius, 2500),
+            "size": 5,
+            "sort": "distance",
+        })
+        sw_res, hub_res, term_res = await asyncio.gather(
+            async_http_get_json(sw_url, headers=headers, timeout=3.5),
+            async_http_get_json(hub_url, headers=headers, timeout=3.5),
+            async_http_get_json(term_url, headers=headers, timeout=3.5),
+            return_exceptions=True,
+        )
+        docs = []
+        if isinstance(sw_res, dict):
+            for d in sw_res.get("documents", []):
+                d["_transit_kind"] = "SUBWAY"
+                docs.append(d)
+        for res_item in (hub_res, term_res):
+            if isinstance(res_item, dict):
+                for d in res_item.get("documents", []):
+                    cat_name = d.get("category_name") or ""
+                    if "교통,수송" in cat_name or "정류장" in cat_name or "터미널" in cat_name:
+                        d["_transit_kind"] = "BUS"
+                        docs.append(d)
+        return docs
 
-    import math
-    def get_dist_meters(lat1, lon1, lat2, lon2):
-        R = 6371000
-        dLat = math.radians(lat2 - lat1)
-        dLon = math.radians(lon2 - lon1)
-        a = math.sin(dLat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dLon/2)**2
-        return int(2 * R * math.asin(math.sqrt(a)))
+    if is_pyeongnae_area:
+        kakao_docs = await _fetch_kakao_transit_stops()
+        tago_stops = []
+    else:
+        kakao_docs, tago_stops = await asyncio.gather(
+            _fetch_kakao_transit_stops(),
+            _fetch_tago_nearby_stops(lat, lon),
+        )
+
+    # 타 지역에서는 TAGO 정류소(실시간 node_id/city_code 보유)를 우선 등록
+    for ts in tago_stops:
+        t_key = f"tago_{ts['id']}"
+        stops_dict[t_key] = ts
+
+    for d in kakao_docs:
+        raw_name = (d.get("place_name") or "").replace(" 버스정류장", "").replace(" 정류소", "").strip()
+        if not raw_name:
+            continue
+        k_lat = float(d.get("y"))
+        k_lon = float(d.get("x"))
+        # 이미 등록된 정류소(동일명 및 80m 이내 중복)에 주소 보강 후 스킵
+        dup_found = False
+        for existing in stops_dict.values():
+            ex_dist = haversine_distance(k_lat, k_lon, float(existing["latitude"]), float(existing["longitude"]))
+            if existing["name"] == raw_name and ex_dist <= 80:
+                if not existing.get("address"):
+                    existing["address"] = d.get("road_address_name") or d.get("address_name") or ""
+                dup_found = True
+                break
+        if dup_found:
+            continue
+        k_id = str(d.get("id") or raw_name)
+        t_kind = d.get("_transit_kind") or "BUS"
+        stops_dict[f"kakao_{k_id}"] = {
+            "id": k_id,
+            "name": raw_name,
+            "full_name": d.get("place_name"),
+            "transit_kind": t_kind,
+            "address": d.get("road_address_name") or d.get("address_name") or "",
+            "latitude": k_lat,
+            "longitude": k_lon,
+            "direction": "hopyeong" if is_pyeongnae_area else "local",
+            "is_curated_pyeongnae": False,
+            "distance": int(d.get("distance", 0)) if d.get("distance") else 0
+        }
 
     stops_list = list(stops_dict.values())
     for s in stops_list:
         s["lat"] = float(s["latitude"])
         s["lon"] = float(s["longitude"])
         if "direction" not in s:
-            s["direction"] = "hopyeong"
-        s["distance"] = get_dist_meters(lat, lon, s["latitude"], s["longitude"])
+            s["direction"] = "hopyeong" if is_pyeongnae_area else "local"
+        s["distance"] = int(haversine_distance(lat, lon, s["latitude"], s["longitude"]))
 
     stops_list.sort(key=lambda x: x["distance"])
-    set_cached_data(cache_key, stops_list, ttl_seconds=3600)
+    set_cached_data(cache_key, stops_list, ttl_seconds=1800)
     return stops_list
 
 async def get_transit_routes(username: str = None):
@@ -566,63 +682,158 @@ STATION_BUS_ROUTES_BY_DIRECTION = {
     }
 }
 
-async def get_station_arrivals(station_name: str, station_id: str = None, direction: str = "hopyeong"):
-    """정류장별 실시간 버스 도착 정보 목록 조회 (방향 지원: hopyeong vs seoul)"""
+async def get_station_arrivals(station_name: str, station_id: str = None, direction: str = "hopyeong", city_code: str = None, lat: float = None, lon: float = None):
+    """정류장별 실시간 버스 도착 정보 목록 조회 (평내·호평 정밀 양방향 + 전국 TAGO 실시간 조회)"""
     matched_key = None
-    clean_name = station_name.replace(" 정류소", "").replace(" 정류장", "").strip()
+    clean_name = (station_name or "").replace(" 정류소", "").replace(" 정류장", "").strip()
+
+    # 좌표가 제공된 경우 평내·호평 반경(5km) 외부인지 판별
+    is_external_coord = False
+    if lat is not None and lon is not None:
+        if haversine_distance(lat, lon, DEFAULT_LOCATION["lat"], DEFAULT_LOCATION["lon"]) > 5000:
+            is_external_coord = True
+    if city_code and str(city_code) != "31130":
+        is_external_coord = True
 
     # 정류소 번호(ARS-ID) 힌트 확인
     ars_id = station_id or ""
     next_direction_label = ""
 
-    if "23453" in clean_name or ars_id == "23453":
-        matched_key = "평내화성.유진아파트"
-        direction = "hopyeong"
-        next_direction_label = "평내신명.대주.금호아파트 방면"
-        ars_id = "23453"
-    elif "23454" in clean_name or ars_id == "23454":
-        matched_key = "평내화성.유진아파트"
-        direction = "seoul"
-        next_direction_label = "평내동주민센터.남양주소방서 방면"
-        ars_id = "23454"
-    elif "23455" in clean_name or ars_id == "23455":
-        matched_key = "평내신명.대주.금호아파트"
-        direction = "hopyeong"
-        next_direction_label = "평내중흥.유라.삼창아파트 방면"
-        ars_id = "23455"
-    elif "23456" in clean_name or ars_id == "23456":
-        matched_key = "평내신명.대주.금호아파트"
-        direction = "seoul"
-        next_direction_label = "평내화성.유진아파트 방면"
-        ars_id = "23456"
-    elif "23476" in clean_name or ars_id == "23476":
-        matched_key = "호평상업지구.이마트"
-        direction = "seoul"
-        next_direction_label = "평내호평역·평내유진아파트 방면"
-        ars_id = "23476"
-    elif "23477" in clean_name or ars_id == "23477":
-        matched_key = "호평마을금강아파트"
-        direction = "hopyeong"
-        next_direction_label = "호평동차고지 & 수진사 방면"
-        ars_id = "23477"
-    else:
-        for k in STATION_BUS_ROUTES_BY_DIRECTION:
-            if k in clean_name or clean_name in k:
-                matched_key = k
-                break
-        if not matched_key:
-            if "이마트" in clean_name or "상업지구" in clean_name:
-                matched_key = "호평상업지구.이마트"
-            elif "금강" in clean_name:
-                matched_key = "호평마을금강아파트"
-            elif "화성" in clean_name or "유진" in clean_name:
-                matched_key = "평내화성.유진아파트"
-            elif "신명" in clean_name or "대주" in clean_name:
-                matched_key = "평내신명.대주.금호아파트"
-            elif "중흥" in clean_name:
-                matched_key = "평내중흥.유라.삼창아파트"
-            else:
-                matched_key = "평내화성.유진아파트"
+    if not is_external_coord:
+        if "23453" in clean_name or ars_id == "23453":
+            matched_key = "평내화성.유진아파트"
+            direction = "hopyeong"
+            next_direction_label = "평내신명.대주.금호아파트 방면"
+            ars_id = "23453"
+        elif "23454" in clean_name or ars_id == "23454":
+            matched_key = "평내화성.유진아파트"
+            direction = "seoul"
+            next_direction_label = "평내동주민센터.남양주소방서 방면"
+            ars_id = "23454"
+        elif "23455" in clean_name or ars_id == "23455":
+            matched_key = "평내신명.대주.금호아파트"
+            direction = "hopyeong"
+            next_direction_label = "평내중흥.유라.삼창아파트 방면"
+            ars_id = "23455"
+        elif "23456" in clean_name or ars_id == "23456":
+            matched_key = "평내신명.대주.금호아파트"
+            direction = "seoul"
+            next_direction_label = "평내화성.유진아파트 방면"
+            ars_id = "23456"
+        elif "23476" in clean_name or ars_id == "23476":
+            matched_key = "호평상업지구.이마트"
+            direction = "seoul"
+            next_direction_label = "평내호평역·평내유진아파트 방면"
+            ars_id = "23476"
+        elif "23477" in clean_name or ars_id == "23477":
+            matched_key = "호평마을금강아파트"
+            direction = "hopyeong"
+            next_direction_label = "호평동차고지 & 수진사 방면"
+            ars_id = "23477"
+        else:
+            for k in STATION_BUS_ROUTES_BY_DIRECTION:
+                if k in clean_name or clean_name in k:
+                    matched_key = k
+                    break
+            if not matched_key:
+                if "호평" in clean_name and ("이마트" in clean_name or "상업지구" in clean_name):
+                    matched_key = "호평상업지구.이마트"
+                elif "이마트 남양주" in clean_name:
+                    matched_key = "이마트 남양주점"
+                elif "금강" in clean_name and "호평" in clean_name:
+                    matched_key = "호평마을금강아파트"
+                elif ("평내" in clean_name) and ("화성" in clean_name or "유진" in clean_name):
+                    matched_key = "평내화성.유진아파트"
+                elif ("평내" in clean_name) and ("신명" in clean_name or "대주" in clean_name):
+                    matched_key = "평내신명.대주.금호아파트"
+                elif ("평내" in clean_name) and ("중흥" in clean_name):
+                    matched_key = "평내중흥.유라.삼창아파트"
+
+    # 타 지역 정류소: 국토교통부 TAGO 실시간 조회 (절대 평내 버스로 잘못 폴백하지 않음)
+    if not matched_key:
+        kakao_map_url = f"https://map.kakao.com/link/search/{urllib.parse.quote(clean_name + ' 버스정류장')}"
+        resolved_city = str(city_code or "").strip()
+        resolved_node = str(station_id or "").strip()
+        resolved_ars = ""
+
+        # nodeId / cityCode가 없는 카카오 정류소라면 좌표 기반 TAGO 근접 정류소 매칭 시도
+        if (not resolved_city or not resolved_node or not resolved_node[0:1].isalpha()) and lat is not None and lon is not None:
+            nearby_tago = await _fetch_tago_nearby_stops(lat, lon)
+            best = None
+            clean_compact = clean_name.replace(" ", "").replace(".", "")
+            for ts in nearby_tago:
+                t_compact = ts["name"].replace(" ", "").replace(".", "")
+                if clean_compact in t_compact or t_compact in clean_compact:
+                    best = ts
+                    break
+            if not best and nearby_tago:
+                # 80m 이내 가장 가까운 정류소 매칭
+                nearest = min(nearby_tago, key=lambda x: haversine_distance(lat, lon, x["latitude"], x["longitude"]))
+                if haversine_distance(lat, lon, nearest["latitude"], nearest["longitude"]) <= 80:
+                    best = nearest
+            if best:
+                resolved_city = best.get("city_code") or resolved_city
+                resolved_node = best.get("node_id") or resolved_node
+                resolved_ars = best.get("ars_id") or ""
+
+        arrivals = []
+        if DATA_GO_KR_API_KEY and resolved_city and resolved_node:
+            try:
+                url = "https://apis.data.go.kr/1613000/ArvlInfoInqireService/getSttnAcctoArvlPrearngeInfoList"
+                params = {
+                    "serviceKey": DATA_GO_KR_API_KEY,
+                    "cityCode": resolved_city,
+                    "nodeId": resolved_node,
+                    "numOfRows": "20",
+                    "pageNo": "1",
+                    "_type": "json",
+                }
+                data = await async_http_get_json(f"{url}?{urllib.parse.urlencode(params)}", timeout=4.0)
+                items = data.get("response", {}).get("body", {}).get("items", {})
+                if isinstance(items, dict):
+                    items = items.get("item", [])
+                if isinstance(items, dict):
+                    items = [items]
+                if isinstance(items, list):
+                    items.sort(key=lambda x: int(x.get("arrtime", 99999)))
+                    for it in items:
+                        sec = int(it.get("arrtime", 0))
+                        mins = max(1, sec // 60)
+                        cnt = it.get("arrprevstationcnt", 1)
+                        v_type = it.get("vehicletp") or it.get("routetp") or "일반"
+                        r_no = str(it.get("routeno") or "")
+                        if not r_no:
+                            continue
+                        badge_color = "#10b981" if mins <= 5 else ("#3b82f6" if mins <= 10 else "#64748b")
+                        arrivals.append({
+                            "route_no": r_no,
+                            "transit_type": "BUS",
+                            "type_desc": str(v_type),
+                            "destination": f"{it.get('routetp') or '시내버스'} 실시간 운행",
+                            "remain_time": f"{mins}분 후 도착",
+                            "remain_stops": f"{cnt}정거장 전",
+                            "badge_color": badge_color,
+                            "station_name": station_name,
+                            "direction": "local",
+                        })
+            except Exception:
+                pass
+
+        return {
+            "station_name": station_name,
+            "matched_key": None,
+            "is_curated_pyeongnae": False,
+            "is_realtime": bool(arrivals),
+            "city_code": resolved_city,
+            "node_id": resolved_node,
+            "ars_id": resolved_ars or resolved_node or "-",
+            "next_direction": "실시간 주변 정류소",
+            "current_direction": "local",
+            "direction_label": "현재 위치 주변 정류소",
+            "fallback_notice": "" if arrivals else "실시간 TAGO 도착 정보가 미제공되거나 운행 종료된 정류소입니다. 카카오맵에서 실시간 도착을 확인하세요.",
+            "kakao_map_url": kakao_map_url,
+            "arrivals": arrivals,
+        }
 
     station_dict = STATION_BUS_ROUTES_BY_DIRECTION.get(matched_key, {})
     dir_key = "hopyeong" if direction in ["hopyeong", "호평", "호평동"] else "seoul"
@@ -668,6 +879,7 @@ async def get_station_arrivals(station_name: str, station_id: str = None, direct
     return {
         "station_name": station_name,
         "matched_key": matched_key,
+        "is_curated_pyeongnae": True,
         "ars_id": ars_id,
         "next_direction": next_direction_label,
         "current_direction": dir_key,

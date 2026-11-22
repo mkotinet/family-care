@@ -18,7 +18,7 @@ from backend.services.auth import (
     revoke_token,
     ADMIN_USERNAMES,
 )
-from backend.services.location import update_user_location, get_family_locations, request_child_ping
+from backend.services.location import update_user_location, get_family_locations, request_child_ping, reverse_geocode
 from backend.services.chat import get_chat_rooms, get_messages, send_message
 from backend.services.places import add_favorite_place, get_favorite_places, remove_favorite_place, update_favorite_place
 from backend.services.weather import get_weather_data
@@ -326,6 +326,13 @@ async def api_location_request_ping(request: Request, payload: dict = Body(...),
     write_audit_log(parent["username"], "LOCATION_PING_REQUEST", "SUCCESS", f"target={child_username}", _extract_client_ip(request), request.headers.get("user-agent", ""))
     return res
 
+@app.get("/api/location/reverse-geocode")
+async def api_location_reverse_geocode(lat: float = Query(None), lon: float = Query(None)):
+    """좌표 기반 실시간 행정구역/도로명 주소 역지오코딩 (초기화면 위치표시 및 전국 생활정보 연동)"""
+    lat = lat if lat is not None else DEFAULT_LOCATION["lat"]
+    lon = lon if lon is not None else DEFAULT_LOCATION["lon"]
+    return await reverse_geocode(lat, lon)
+
 @app.get("/api/location/family")
 async def api_location_family(user: dict = Depends(require_auth)):
     """로그인 가족 전용 실시간 위치 조회"""
@@ -422,9 +429,23 @@ async def api_transit_nearby_stops(lat: float = Query(None), lon: float = Query(
     return stops
 
 @app.get("/api/transit/station-arrivals")
-async def api_transit_station_arrivals(station_name: str = Query(...), direction: str = Query(None)):
-    """특정 정류소의 실시간 버스 도착 정보 조회 (호평동 vs 청량리/잠실 양방향 지원)"""
-    data = await get_station_arrivals(station_name, direction=direction or "hopyeong")
+async def api_transit_station_arrivals(
+    station_name: str = Query(...),
+    direction: str = Query(None),
+    station_id: str = Query(None),
+    city_code: str = Query(None),
+    lat: float = Query(None),
+    lon: float = Query(None),
+):
+    """특정 정류소의 실시간 버스 도착 정보 조회 (평내·호평 양방향 + 전국 TAGO 실시간)"""
+    data = await get_station_arrivals(
+        station_name,
+        station_id=station_id,
+        direction=direction or "hopyeong",
+        city_code=city_code,
+        lat=lat,
+        lon=lon,
+    )
     return data
 
 @app.post("/api/transit/add")

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=4.0, user-scalable=yes, viewport-fit=cover">
   <title>우리가족챙기기 - 데일리 라이프 비서</title>
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <link rel="stylesheet" href="/static/style.css?v=1.7.0">
-  <link rel="manifest" href="/manifest.json?v=1.7.0">
+  <link rel="stylesheet" href="/static/style.css?v=1.8.0">
+  <link rel="manifest" href="/manifest.json?v=1.8.0">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="/static/icons/icon-512.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png">
@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="우리가족챙기기">
-  <meta name="app-version" content="1.7.0">
+  <meta name="app-version" content="1.8.0">
 
   <!-- Leaflet 오픈스트리트맵 엔진 (카카오맵 인증/로딩 실패 시 즉시 자동 폴백 / SRI 무결성 검증 적용) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -92,12 +92,17 @@
     <!-- 2. 위치 안내 및 자녀 GPS 안심 브리핑 바 -->
     <div class="location-bar">
       <div class="loc-badge">
-        <span>📍</span>
-        <span id="currentLocText">남양주시 평내동 평내유진마젤란</span>
+        <span id="locPinIcon">📍</span>
+        <span id="currentLocText">현재 위치 확인 중...</span>
       </div>
-      <button class="loc-btn" id="btnRefreshLoc" onclick="refreshMyLocation()" title="GPS 재조회">
-        🔄 현위치
-      </button>
+      <div class="loc-actions">
+        <button class="loc-btn loc-btn-home" id="btnSwitchHome" onclick="switchToHomeLocation()" title="우리 집 기준으로 전환" style="display: none;">
+          🏠 우리 집
+        </button>
+        <button class="loc-btn" id="btnRefreshLoc" onclick="refreshMyLocation()" title="내 현재 위치(GPS) 재조회">
+          🔄 현위치
+        </button>
+      </div>
     </div>
 
     <!-- 부모 로그인 시 노출되는 우리 아이 실시간 안심 상태 배너 -->
@@ -897,7 +902,7 @@
     <span class="zoom-reset-btn" title="기본 크기로 복귀">✕ 리셋</span>
   </div>
 
-  <script src="/static/js/core.js?v=1.7.0"></script>
-  <script src="/static/app.js?v=1.7.0"></script>
+  <script src="/static/js/core.js?v=1.8.0"></script>
+  <script src="/static/app.js?v=1.8.0"></script>
 </body>
 </html>

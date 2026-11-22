@@ -35,10 +35,22 @@ const AppState = {
   familyMembers: [],       // 4인 공식 가족 회원
   kakao_js_key: "",
   mapEngine: "leaflet",    // 'kakao' or 'leaflet'
+  homeLocation: {
+    lat: 37.643421,
+    lon: 127.236018,
+    address: "남양주시 평내동 평내마젤란21아파트",
+    shortLabel: "남양주시 평내동"
+  },
   location: {
     lat: 37.643421,
     lon: 127.236018,
-    address: "남양주시 평내동 평내마젤란21아파트"
+    address: "남양주시 평내동 (우리 집)",
+    shortLabel: "남양주시 평내동",
+    sido: "경기도",
+    sigungu: "남양주시",
+    dong: "평내동",
+    isNearHome: true,
+    gpsResolved: false
   },
   weatherData: null,
   weatherTab: "hourly",
@@ -113,9 +125,128 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 });
 
-// 앱 실행 시 브라우저 GPS로 내 현재 위치를 자동 탐색하여 날씨와 위치를 즉시 동기화
+// 현재 기준점 라벨 반환 (집 인근이면 '🏡 우리 집', 외부면 '📍 현재 내 위치')
+function getOriginPinLabel() {
+  if (AppState.location && AppState.location.isNearHome) {
+    return "🏡 우리 집";
+  }
+  const short = (AppState.location && AppState.location.shortLabel) ? AppState.location.shortLabel : "현재 내 위치";
+  return `📍 현재 내 위치 (${short})`;
+}
+
+function getOriginShortName() {
+  return (AppState.location && AppState.location.isNearHome) ? "우리 집" : "현재 내 위치";
+}
+
+function updateLocationBarUI() {
+  const locEl = document.getElementById("currentLocText");
+  const pinEl = document.getElementById("locPinIcon");
+  const homeBtn = document.getElementById("btnSwitchHome");
+  const isNearHome = Boolean(AppState.location && AppState.location.isNearHome);
+  if (pinEl) pinEl.textContent = isNearHome ? "🏡" : "📍";
+  if (locEl) {
+    locEl.textContent = (AppState.location && AppState.location.address) || "남양주시 평내동 (우리 집)";
+  }
+  if (homeBtn) {
+    homeBtn.style.display = isNearHome ? "none" : "inline-flex";
+  }
+}
+
+// 서버 통합 역지오코딩 API(/api/location/reverse-geocode)로 좌표 -> 행정구역 즉시 변환 (카카오 JS SDK 불필요)
+async function syncLocationAddress(lat, lon, persist = true) {
+  try {
+    const res = await fetch(`/api/location/reverse-geocode?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
+    if (!res.ok) throw new Error("reverse-geocode status " + res.status);
+    const geo = await res.json();
+    AppState.location = {
+      lat: Number(lat),
+      lon: Number(lon),
+      address: geo.display_name || geo.short_label || geo.full_address || "현재 위치",
+      shortLabel: geo.short_label || geo.dong || geo.sigungu || "현재 위치",
+      sido: geo.sido || "",
+      sigungu: geo.sigungu || "",
+      dong: geo.dong || "",
+      isNearHome: Boolean(geo.is_near_home),
+      gpsResolved: true
+    };
+    updateLocationBarUI();
+    if (persist) {
+      try {
+        localStorage.setItem("fc_last_location", JSON.stringify({
+          lat: AppState.location.lat,
+          lon: AppState.location.lon,
+          address: AppState.location.address,
+          shortLabel: AppState.location.shortLabel,
+          sido: AppState.location.sido,
+          sigungu: AppState.location.sigungu,
+          dong: AppState.location.dong,
+          isNearHome: AppState.location.isNearHome,
+          ts: Date.now()
+        }));
+      } catch (e) {}
+    }
+    return geo;
+  } catch (e) {
+    const hLat = AppState.homeLocation.lat;
+    const hLon = AppState.homeLocation.lon;
+    const distHome = typeof calcHaversineMeters === "function" ? calcHaversineMeters(lat, lon, hLat, hLon) : 0;
+    AppState.location.lat = Number(lat);
+    AppState.location.lon = Number(lon);
+    AppState.location.isNearHome = distHome <= 250;
+    if (AppState.location.isNearHome) {
+      AppState.location.address = "남양주시 평내동 (우리 집)";
+      AppState.location.shortLabel = "남양주시 평내동";
+    } else {
+      AppState.location.address = `현재 위치 (${Number(lat).toFixed(4)}, ${Number(lon).toFixed(4)})`;
+      AppState.location.shortLabel = "현재 위치";
+    }
+    updateLocationBarUI();
+    return null;
+  }
+}
+
+// 현재 열린 카테고리 바텀시트가 있으면 새 위치 기준으로 즉시 리렌더링
+async function reloadOpenCategorySheet() {
+  const backdrop = document.getElementById("sheetBackdrop");
+  if (!backdrop || !backdrop.classList.contains("open") || !AppState.currentCategory) return;
+  const cat = AppState.currentCategory;
+  if (["weather", "transit", "hospital", "restaurant", "culture", "health"].includes(cat)) {
+    const prevMode = AppState.detailViewMode;
+    await openCategoryDetail(cat);
+    if (prevMode === "map" && ["transit", "restaurant", "hospital", "culture"].includes(cat)) {
+      switchDetailView("map", true);
+    }
+  }
+}
+
+// 외출 중 [🏠 우리 집] 버튼 클릭 시 평내마젤란21 기준으로 즉시 전환
+async function switchToHomeLocation() {
+  const h = AppState.homeLocation;
+  AppState.location = {
+    lat: h.lat,
+    lon: h.lon,
+    address: "남양주시 평내동 (우리 집)",
+    shortLabel: "남양주시 평내동",
+    sido: "경기도",
+    sigungu: "남양주시",
+    dong: "평내동",
+    isNearHome: true,
+    gpsResolved: true
+  };
+  updateLocationBarUI();
+  await refreshData(true);
+  await reloadOpenCategorySheet();
+  if (typeof showToast === "function") {
+    showToast("🏡 우리 집(남양주시 평내동) 기준으로 전환되었습니다.", "info");
+  }
+}
+
+// 앱 실행 시 브라우저 GPS로 내 현재 위치를 자동 탐색하여 초기 위치명·날씨·생활정보를 즉시 동기화
 async function autoDetectUserLocation() {
-  if (!navigator.geolocation) return;
+  if (!navigator.geolocation) {
+    await syncLocationAddress(AppState.location.lat, AppState.location.lon, false);
+    return;
+  }
 
   navigator.geolocation.getCurrentPosition(
     async (pos) => {
@@ -129,23 +260,12 @@ async function autoDetectUserLocation() {
 
       AppState.location.lat = lat;
       AppState.location.lon = lon;
+      AppState.location.gpsResolved = true;
 
-      // 카카오 역지오코딩 시도
-      try {
-        if (typeof kakao !== "undefined" && kakao.maps && kakao.maps.services) {
-          const geocoder = new kakao.maps.services.Geocoder();
-          geocoder.coord2RegionCode(lon, lat, (result, status) => {
-            if (status === kakao.maps.services.Status.OK && result.length > 0) {
-              const r = result[0];
-              AppState.location.address = `${r.region_1depth_name} ${r.region_2depth_name} ${r.region_3depth_name}`;
-              const locEl = document.getElementById("currentLocText");
-              if (locEl) locEl.innerText = AppState.location.address;
-            }
-          });
-        }
-      } catch (e) {}
+      // 서버 측 카카오 REST 역지오코딩으로 초기 화면 위치명 즉시 표시 (JS SDK 불필요)
+      await syncLocationAddress(lat, lon, true);
 
-      // 기존 거점과 150m 이상 달라진 경우에만 날씨/즐겨찾기 재조회 (초기 3중 중복 호출 차단)
+      // 기존 거점과 150m 이상 달라진 경우 날씨/즐겨찾기 및 열린 시트 자동 재조회
       if (movedMeters >= 150 || !AppState.weatherData) {
         try {
           const res = await fetch(`/api/weather?lat=${lat}&lon=${lon}&_t=${Date.now()}`);
@@ -154,6 +274,7 @@ async function autoDetectUserLocation() {
           renderWeatherSummary(wData);
         } catch (e) {}
         loadFavorites();
+        await reloadOpenCategorySheet();
       }
 
       // 자녀 계정(도비사랑녀, 미니미니채) 로그인 중일 경우 실시간 GPS 즉각 보고
@@ -174,12 +295,16 @@ async function autoDetectUserLocation() {
         }).catch(() => {});
       }
 
-      console.log(`[Auto Location] 내 위치 자동 반영 완료: (${lat}, ${lon}, 이동=${movedMeters}m)`);
+      console.log(`[Auto Location] 내 위치 자동 반영 완료: (${lat}, ${lon}, ${AppState.location.address}, 이동=${movedMeters}m)`);
     },
-    (err) => {
-      console.log("[Auto Location] GPS 권한 미허용/타임아웃. 기본 거점(평내유진마젤란) 유지");
+    async () => {
+      console.log("[Auto Location] GPS 권한 미허용/타임아웃. 최근 위치 또는 우리 집 기준으로 표시");
+      updateLocationBarUI();
+      if (!AppState.location.address || AppState.location.address.includes("확인 중")) {
+        await syncLocationAddress(AppState.location.lat, AppState.location.lon, false);
+      }
     },
-    { enableHighAccuracy: false, timeout: 6000, maximumAge: 60000 }
+    { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
   );
 }
 
@@ -435,7 +560,45 @@ async function initApp() {
 
     AppState.familyMembers = data.family_members || [];
     if (data.default_location) {
-      AppState.location = data.default_location;
+      AppState.homeLocation = {
+        lat: Number(data.default_location.lat) || 37.643421,
+        lon: Number(data.default_location.lon) || 127.236018,
+        address: data.default_location.name || "남양주시 평내동 평내마젤란21아파트",
+        shortLabel: "남양주시 평내동"
+      };
+    }
+
+    // 최근 GPS 위치 캐시(24시간 이내)가 있으면 즉시 복원하여 외출 중 평내 고정 깜빡임 방지
+    if (!AppState.location.gpsResolved) {
+      let hydrated = false;
+      try {
+        const rawCachedLoc = localStorage.getItem("fc_last_location");
+        if (rawCachedLoc) {
+          const parsedLoc = JSON.parse(rawCachedLoc);
+          if (parsedLoc && parsedLoc.lat && parsedLoc.lon && parsedLoc.ts && (Date.now() - parsedLoc.ts < 86400000)) {
+            AppState.location = Object.assign({}, AppState.location, {
+              lat: Number(parsedLoc.lat),
+              lon: Number(parsedLoc.lon),
+              address: parsedLoc.address || AppState.location.address,
+              shortLabel: parsedLoc.shortLabel || "현재 위치",
+              sido: parsedLoc.sido || "",
+              sigungu: parsedLoc.sigungu || "",
+              dong: parsedLoc.dong || "",
+              isNearHome: Boolean(parsedLoc.isNearHome),
+              gpsResolved: false
+            });
+            hydrated = true;
+          }
+        }
+      } catch (e) {}
+      if (!hydrated && AppState.homeLocation) {
+        AppState.location.lat = AppState.homeLocation.lat;
+        AppState.location.lon = AppState.homeLocation.lon;
+        AppState.location.address = "남양주시 평내동 (우리 집)";
+        AppState.location.shortLabel = "남양주시 평내동";
+        AppState.location.isNearHome = true;
+      }
+      updateLocationBarUI();
     }
     if (data.kakao_js_key) {
       AppState.kakao_js_key = data.kakao_js_key;
@@ -1375,21 +1538,23 @@ async function openCategoryDetail(cat) {
     togglePills.style.display = "none";
   }
 
+  const areaLabel = (AppState.location && AppState.location.shortLabel) || "현재 위치";
+
   if (cat === "weather") {
     titleEl.textContent = "🌤️ 상세 날씨 & 7일간 예보";
-    subEl.textContent = "기상청 단기예보 & 초단기실황 실시간 연동";
+    subEl.textContent = `${areaLabel} 기상청 단기예보 & 초단기실황 실시간 연동`;
     renderWeatherDetail(contentEl);
   } else if (cat === "transit") {
     titleEl.textContent = "🚌 실시간 교통 & 노선 도착 알림";
-    subEl.textContent = "국토교통부 TAGO 버스 도착 정보 & 정류소 지도 검색";
+    subEl.textContent = `${areaLabel} 주변 정류소 & 국토교통부 TAGO 실시간 도착`;
     await renderTransitDetail(contentEl);
   } else if (cat === "hospital") {
     titleEl.textContent = "🏥 병원 & 당번약국 실시간 현황";
-    subEl.textContent = "국립중앙의료원(E-Gen) 연동: 평내·호평 주말/야간 진료";
+    subEl.textContent = `${areaLabel} 인근 병원·소아과·약국 실시간 현황 (카카오 + E-Gen)`;
     await renderHospitalDetail(contentEl);
   } else if (cat === "restaurant") {
     titleEl.textContent = "🍽️ 식당 & 주말외식 / 단골맛집";
-    subEl.textContent = "카카오 로컬 API 평내유진마젤란 인근 맛집 실시간 검색";
+    subEl.textContent = `${areaLabel} 인근 맛집 카카오 로컬 실시간 검색`;
     await renderRestaurantDetail(contentEl);
   } else if (cat === "culture") {
     titleEl.textContent = "🎪 축제 · 주말나들이 & 붐빔예측";
@@ -1397,7 +1562,7 @@ async function openCategoryDetail(cat) {
     await renderCultureDetail(contentEl);
   } else if (cat === "health") {
     titleEl.textContent = "🌸 알레르기 & 감염병 통합 예보";
-    subEl.textContent = "기상청 꽃가루 지수 & 대기질 연계 건강 알람";
+    subEl.textContent = `${areaLabel} 기준 기상청 꽃가루 지수 & 대기질 연계 건강 알람`;
     await renderHealthDetail(contentEl);
   }
 }
@@ -1550,16 +1715,18 @@ function initLeafletCategoryMap(container) {
 
   AppState.leafletCategoryMap = map;
 
-  // 우리 집 마커
+  // 현재 기준 위치 마커 (집 인근이면 '🏡 우리 집', 외부면 '📍 현재 내 위치')
+  const originLabel = getOriginPinLabel();
+  const originAddr = (AppState.location && AppState.location.address) || "현재 위치";
   const homeIcon = L.divIcon({
     className: 'custom-home-pin',
-    html: '<div style="background:#0f172a;color:white;padding:4px 8px;border-radius:10px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:1px solid #ffffff;">🏡 우리 집 (평내유진마젤란)</div>',
-    iconSize: [60, 24],
-    iconAnchor: [30, 12]
+    html: `<div style="background:#0f172a;color:white;padding:4px 8px;border-radius:10px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:1px solid #ffffff;">${escapeHtml(originLabel)}</div>`,
+    iconSize: [90, 24],
+    iconAnchor: [45, 12]
   });
   L.marker([AppState.location.lat, AppState.location.lon], { icon: homeIcon })
     .addTo(map)
-    .bindPopup('<b>🏡 우리 집</b><br>남양주시 평내동 평내유진마젤란');
+    .bindPopup(`<b>${escapeHtml(originLabel)}</b><br>${escapeHtml(originAddr)}`);
 
   // 지도 빈 곳 클릭 시 직접 핀 꽂기 (나만의 버스 정류소 핀 꽂기)
   map.on('click', function(e) {
@@ -1600,11 +1767,11 @@ function renderLeafletCategoryMarkers(map) {
     });
   } else if (cat === "restaurant" && AppState.cachedPlaces) {
     AppState.cachedPlaces.forEach((p, idx) => {
-      const pLat = AppState.location.lat + (Math.sin(idx + 1) * 0.005);
-      const pLon = AppState.location.lon + (Math.cos(idx + 1) * 0.005);
+      const pLat = Number(p.lat || p.latitude) || (AppState.location.lat + (Math.sin(idx + 1) * 0.005));
+      const pLon = Number(p.lon || p.longitude) || (AppState.location.lon + (Math.cos(idx + 1) * 0.005));
       const icon = L.divIcon({
         className: 'cat-marker-pin',
-        html: `<div style="background:#f97316;color:white;padding:3px 6px;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);">🍽️ ${p.name}</div>`,
+        html: `<div style="background:#f97316;color:white;padding:3px 6px;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);">🍽️ ${escapeHtml(p.name)}</div>`,
         iconSize: [70, 24],
         iconAnchor: [35, 12]
       });
@@ -1615,12 +1782,12 @@ function renderLeafletCategoryMarkers(map) {
     });
   } else if (cat === "hospital" && AppState.cachedHospitals) {
     AppState.cachedHospitals.forEach((h, idx) => {
-      const hLat = AppState.location.lat + (Math.cos(idx + 2) * 0.0045);
-      const hLon = AppState.location.lon + (Math.sin(idx + 2) * 0.0045);
+      const hLat = Number(h.lat || h.latitude) || (AppState.location.lat + (Math.cos(idx + 2) * 0.0045));
+      const hLon = Number(h.lon || h.longitude) || (AppState.location.lon + (Math.sin(idx + 2) * 0.0045));
       const isPharm = (h.type === "약국");
       const icon = L.divIcon({
         className: 'cat-marker-pin',
-        html: `<div style="background:${isPharm ? '#10b981' : '#3b82f6'};color:white;padding:3px 6px;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);">${isPharm ? '💊' : '🏥'} ${h.name}</div>`,
+        html: `<div style="background:${isPharm ? '#10b981' : '#3b82f6'};color:white;padding:3px 6px;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);">${isPharm ? '💊' : '🏥'} ${escapeHtml(h.name)}</div>`,
         iconSize: [70, 24],
         iconAnchor: [35, 12]
       });
@@ -1652,9 +1819,10 @@ function initKakaoCategoryMap(container) {
     map: AppState.kakaoCategoryMap
   });
 
+  const originLabel = getOriginPinLabel();
   const homeOverlay = new kakao.maps.CustomOverlay({
     position: homeMarker.getPosition(),
-    content: '<div style="padding: 4px 8px; background: #0f172a; color: white; font-size: 11px; font-weight: 800; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2);">🏡 우리 집</div>',
+    content: `<div style="padding: 4px 8px; background: #0f172a; color: white; font-size: 11px; font-weight: 800; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); white-space: nowrap;">${escapeHtml(originLabel)}</div>`,
     yAnchor: 2.2
   });
   homeOverlay.setMap(AppState.kakaoCategoryMap);
@@ -2294,13 +2462,14 @@ async function focusSinglePlaceOnMap(place, category) {
   if (AppState.mapEngine === "kakao" && AppState.kakaoCategoryMap) {
     const map = AppState.kakaoCategoryMap;
 
-    // 우리 집 마커 & 오버레이 보장
+    // 기준 위치 마커 & 오버레이 보장
+    const originPinTxt = getOriginPinLabel();
     const homePos = new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon);
     const homeMarker = new kakao.maps.Marker({ position: homePos, map: map });
     AppState.categoryMarkers.push(homeMarker);
     const homeOverlay = new kakao.maps.CustomOverlay({
       position: homePos,
-      content: '<div style="padding: 4px 8px; background: #0f172a; color: white; font-size: 11px; font-weight: 800; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); white-space:nowrap;">🏡 우리 집 (내 위치)</div>',
+      content: `<div style="padding: 4px 8px; background: #0f172a; color: white; font-size: 11px; font-weight: 800; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); white-space:nowrap;">${escapeHtml(originPinTxt)}</div>`,
       yAnchor: 2.2
     });
     homeOverlay.setMap(map);
@@ -2337,11 +2506,12 @@ async function focusSinglePlaceOnMap(place, category) {
     // Leaflet인 경우
     const map = AppState.leafletCategoryMap;
 
+    const originPinTxtL = getOriginPinLabel();
     const homeIcon = L.divIcon({
       className: 'custom-home-pin',
-      html: '<div style="background:#0f172a;color:white;padding:4px 8px;border-radius:10px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:1px solid #ffffff;">🏡 우리 집 (내 위치)</div>',
-      iconSize: [60, 24],
-      iconAnchor: [30, 12]
+      html: `<div style="background:#0f172a;color:white;padding:4px 8px;border-radius:10px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:1px solid #ffffff;">${escapeHtml(originPinTxtL)}</div>`,
+      iconSize: [90, 24],
+      iconAnchor: [45, 12]
     });
     const hm = L.marker([AppState.location.lat, AppState.location.lon], { icon: homeIcon }).addTo(map);
     AppState.categoryMarkers.push(hm);
@@ -2367,7 +2537,7 @@ async function focusSinglePlaceOnMap(place, category) {
   // 상단 안내창에 단일 포커스 안내 및 전체 핀 복원 버튼 노출
   const helperEl = document.getElementById("mapHelperText");
   if (helperEl) {
-    helperEl.innerHTML = `📍 <b>${place.name}</b> 위치 포커스됨 (🏡 우리 집에서 경로선 표시) <button onclick="showAllCategoryMarkers()" style="border:none;background:#f1f5f9;color:#0284c7;font-weight:700;padding:2px 7px;border-radius:6px;font-size:11px;cursor:pointer;margin-left:6px;">📍 전체 핀 보기</button>`;
+    helperEl.innerHTML = `📍 <b>${escapeHtml(place.name)}</b> 위치 포커스됨 (${escapeHtml(getOriginPinLabel())}에서 경로선 표시) <button onclick="showAllCategoryMarkers()" style="border:none;background:#f1f5f9;color:#0284c7;font-weight:700;padding:2px 7px;border-radius:6px;font-size:11px;cursor:pointer;margin-left:6px;">📍 전체 핀 보기</button>`;
   }
 
   // 바텀 카드 열기
@@ -2376,12 +2546,12 @@ async function focusSinglePlaceOnMap(place, category) {
     categoryTitle: isPharm ? "💊 안심 약국" : (isRestaurant ? "🍽️ 추천 맛집" : "🏥 안심 병원"),
     categoryClass: isPharm ? "pharmacy" : (isRestaurant ? "restaurant" : "hospital"),
     name: place.name,
-    address: place.address || "경기도 남양주시 평내동",
+    address: place.address || (AppState.location && AppState.location.address) || "현재 위치 인근",
     phone: place.phone,
     status_info: place.status_badge || "영업중",
     lat: pLat,
     lon: pLon,
-    extraHtml: `<div style="color: ${isPharm ? '#059669' : (isRestaurant ? '#ea580c' : '#2563eb')}; font-weight: 700;">${place.weekend_info || place.status_badge || '영업 정보'}</div>`
+    extraHtml: `<div style="color: ${isPharm ? '#059669' : (isRestaurant ? '#ea580c' : '#2563eb')}; font-weight: 700;">${escapeHtml(place.weekend_info || place.status_badge || '영업 정보')}</div>`
   });
 }
 
@@ -2448,13 +2618,13 @@ function openSelectedPlaceCard(data) {
     }
   }
 
-  // 집 ➔ 목적지 거리 & 도보/차량 예상 시간 표출 및 경로선 긋기 (식당, 병원, 약국)
+  // 기준 위치 ➔ 목적지 거리 & 도보/차량 예상 시간 표출 및 경로선 긋기 (식당, 병원, 약국)
   if (distBox) {
     if (data.lat && data.lon && (data.categoryClass === "restaurant" || data.categoryClass === "hospital" || data.categoryClass === "pharmacy")) {
       const distInfo = getDistanceFromHome(data.lat, data.lon);
       distBox.style.display = "flex";
       distBox.innerHTML = `
-        <span class="dist-pill">🏡 <b>우리 집(평내유진마젤란)</b>에서 <b>${distInfo.dText}</b></span>
+        <span class="dist-pill">${escapeHtml(getOriginPinLabel())}에서 <b>${distInfo.dText}</b></span>
         <span class="time-pill">🚶 도보 약 ${distInfo.walkMin}분</span>
         <span class="time-pill">🚗 차량 약 ${distInfo.carMin}분</span>
       `;
@@ -2522,12 +2692,15 @@ function navigateSelectedPlace() {
   window.open(url, "_blank");
 }
 
-// 버스 정류소 핀 클릭 시 실시간 도착 정보 조회 및 자동 출발지/도착지 즐겨찾기 연동 (명칭 일치 보장)
+// 버스 정류소 핀 클릭 시 실시간 도착 정보 조회 및 자동 출발지/도착지 즐겨찾기 연동 (평내·호평 + 전국 TAGO 지원)
 async function selectBusStopOnMap(stop, customDirection = null) {
   const sLat = Number(stop.lat || stop.latitude || (AppState.location.lat + 0.001));
   const sLon = Number(stop.lon || stop.longitude || (AppState.location.lon - 0.001));
   const curDir = customDirection || stop.direction || AppState.selectedBusStopDirection || "hopyeong";
   AppState.selectedBusStopDirection = curDir;
+  const areaShort = (AppState.location && AppState.location.shortLabel) || "현재 위치";
+  const stopAddr = stop.address || `${areaShort} 정류소`;
+  const isCuratedStop = Boolean(stop.is_curated_pyeongnae);
 
   // 만약 2단계 루트 빌더에서 출발지가 이미 지정된 상태라면 -> 즉시 도착지로 매핑 & 바로 즐겨찾기 저장 뷰 오픈!
   if (AppState.transitRouteBuilder.origin && !AppState.transitRouteBuilder.destination) {
@@ -2535,7 +2708,7 @@ async function selectBusStopOnMap(stop, customDirection = null) {
       name: stop.name,
       lat: sLat,
       lon: sLon,
-      address: stop.address || `남양주시 평내동 정류소`
+      address: stopAddr
     });
     return;
   }
@@ -2545,10 +2718,9 @@ async function selectBusStopOnMap(stop, customDirection = null) {
     name: stop.name,
     lat: sLat,
     lon: sLon,
-    address: stop.address || `남양주시 평내동 정류소`
+    address: stopAddr
   });
 
-  // 지도 위 오버레이 깃발과 하단 시트에서 100% 동일하게 사용할 단일 표준 명칭
   const standardName = (AppState.transitRouteBuilder.origin && AppState.transitRouteBuilder.origin.name) || stop.name;
 
   if (AppState.mapEngine === "kakao" && AppState.kakaoCategoryMap) {
@@ -2558,86 +2730,79 @@ async function selectBusStopOnMap(stop, customDirection = null) {
   }
 
   const isHopyeong = curDir === "hopyeong";
-  const defaultNextDir = stop.next_station || (isHopyeong ? "평내신명.대주.금호아파트 방면" : "평내동주민센터.남양주소방서 방면");
-  const defaultArsId = stop.ars_id || (isHopyeong ? "23453" : "23454");
+  const defaultNextDir = stop.next_station || (isCuratedStop ? (isHopyeong ? "평내신명.대주.금호아파트 방면" : "평내동주민센터.남양주소방서 방면") : "현재 위치 주변 정류소");
+  const defaultArsId = stop.ars_id || stop.node_id || "-";
+  const distText = stop.distance ? (stop.distance < 1000 ? `${stop.distance}m` : `${(stop.distance / 1000).toFixed(1)}km`) : "인근";
 
   openSelectedPlaceCard({
     category: "교통",
     categoryTitle: "🚏 출발 정류소 선택됨",
     categoryClass: "transit",
     name: standardName,
-    address: `남양주시 평내동 (집에서 약 ${stop.distance || 120}m)`,
+    address: `${stopAddr} (${getOriginShortName()}에서 약 ${distText})`,
     phone: "",
-    status_info: `출발지 지정됨 · ${isHopyeong ? '호평동·평내호평역 방면' : '청량리·잠실·서울 방면'}`,
+    status_info: isCuratedStop
+      ? `출발지 지정됨 · ${isHopyeong ? '호평동·평내호평역 방면' : '청량리·잠실·서울 방면'}`
+      : `출발지 지정됨 · ${areaShort} 주변 정류소`,
     lat: sLat,
     lon: sLon,
     extraHtml: `
       <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 12px; padding: 12px; margin-bottom: 10px;">
-        <div style="font-weight: 800; color: #166534; font-size: 13.5px; margin-bottom: 4px;">🚩 출발지: <b>${standardName}</b></div>
-        <div style="font-size: 11.5px; color: #334155; line-height: 1.4; margin-bottom: 8px;">
-          👉 지도에서 <b>도착할 정류소(또는 위치)</b>를 터치하시면 <b>'출발지 ➔ 도착지'</b> 루트가 자동 생성되어 원클릭으로 즐겨찾기 저장할 수 있습니다.
-        </div>
-
-        <!-- 🏢 호평동 방면 vs 🏙️ 서울 방면 양방향 원클릭 전환 탭 바 -->
-        <div style="display: flex; gap: 6px; margin: 8px 0; background: #e2e8f0; padding: 4px; border-radius: 10px;">
-          <button style="flex: 1; padding: 8px 4px; font-size: 11.5px; font-weight: 800; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; ${isHopyeong ? 'background: #0284c7; color: white; box-shadow: 0 2px 5px rgba(2,132,199,0.3);' : 'background: white; color: #475569;'}" onclick="switchStationDirection('${standardName}', 'hopyeong')">
-            🏢 호평동·수진사 방면
-          </button>
-          <button style="flex: 1; padding: 8px 4px; font-size: 11.5px; font-weight: 800; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; ${!isHopyeong ? 'background: #0284c7; color: white; box-shadow: 0 2px 5px rgba(2,132,199,0.3);' : 'background: white; color: #475569;'}" onclick="switchStationDirection('${standardName}', 'seoul')">
-            🏙️ 서울·잠실·청량리 방면
-          </button>
-        </div>
-
-        <div style="display: flex; gap: 6px;">
-          <button class="btn-primary" style="flex: 2; padding: 10px; font-size: 12px; font-weight: 800; background: #0284c7;" onclick="saveTransitRouteDirect('${standardName}', '${isHopyeong ? '호평동·수진사 방면' : '청량리·잠실 서울 방면'}')">
-            ⭐ [${standardName}] ${isHopyeong ? '호평동 방면' : '서울 방면'} 즐겨찾기 저장
-          </button>
-          <button class="btn-secondary" style="flex: 1; padding: 10px; font-size: 11px;" onclick="resetTransitRouteBuilder()">
-            🔄 초기화
-          </button>
-        </div>
+        <div style="font-weight: 800; color: #166534; font-size: 13.5px; margin-bottom: 4px;">🚩 출발지: <b>${escapeHtml(standardName)}</b></div>
+        <div style="color: #64748b; padding: 4px 0; font-size: 12px;">🚏 실시간 도착 예정 버스 조회 중... 🚌</div>
       </div>
-      <div style="color: #64748b; padding: 4px; font-size: 12px;">🚏 실시간 도착 예정 버스 조회 중... 🚌</div>
     `
   });
 
   try {
-    const res = await fetch(`/api/transit/station-arrivals?station_name=${encodeURIComponent(standardName)}&direction=${curDir}`);
+    const qs = new URLSearchParams({
+      station_name: standardName,
+      direction: curDir,
+      lat: String(sLat),
+      lon: String(sLon)
+    });
+    if (stop.node_id || stop.id) qs.set("station_id", String(stop.node_id || stop.id));
+    if (stop.city_code) qs.set("city_code", String(stop.city_code));
+
+    const res = await fetch(`/api/transit/station-arrivals?${qs.toString()}`);
     const data = await res.json();
     const arrivals = data.arrivals || [];
     const nextDir = data.next_direction || defaultNextDir;
     const arsId = data.ars_id || defaultArsId;
+    const curatedMode = Boolean(data.is_curated_pyeongnae);
+    const safeStdName = standardName.replace(/'/g, "\\'");
 
     let extraHtml = `
       <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 12px; padding: 12px; margin-bottom: 10px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-          <div style="font-weight: 800; color: #166534; font-size: 13.5px;">🚩 출발지: <b>${standardName}</b></div>
-          <span style="font-size: 11px; background: #dcfce7; color: #15803d; padding: 2px 6px; border-radius: 6px; font-weight: 700;">정류소 번호: ${arsId}</span>
+          <div style="font-weight: 800; color: #166534; font-size: 13.5px;">🚩 출발지: <b>${escapeHtml(standardName)}</b></div>
+          <span style="font-size: 11px; background: #dcfce7; color: #15803d; padding: 2px 6px; border-radius: 6px; font-weight: 700;">정류소 번호: ${escapeHtml(arsId)}</span>
         </div>
 
-        <!-- 카카오버스 공식 방면 정보 배너 -->
         <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 7px 10px; margin: 6px 0; font-size: 12px; color: #1e40af; font-weight: 700; display: flex; align-items: center; gap: 6px;">
           <span>👉</span>
-          <span>다음 방면: <b>${nextDir}</b></span>
+          <span>${curatedMode ? '다음 방면' : '정류소 안내'}: <b>${escapeHtml(nextDir)}</b></span>
         </div>
 
         <div style="font-size: 11.5px; color: #334155; line-height: 1.4; margin-bottom: 6px;">
           지도에서 <b>도착할 정류소</b>를 터치하시면 <b>'출발지 ➔ 도착지'</b> 루트가 자동 완성됩니다!
         </div>
 
+        ${curatedMode ? `
         <!-- 🏢 호평동 방면 vs 🏙️ 서울 방면 양방향 원클릭 전환 탭 바 -->
         <div style="display: flex; gap: 6px; margin: 8px 0; background: #e2e8f0; padding: 4px; border-radius: 10px;">
-          <button style="flex: 1; padding: 8px 4px; font-size: 11.5px; font-weight: 800; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; ${isHopyeong ? 'background: #0284c7; color: white; box-shadow: 0 2px 5px rgba(2,132,199,0.3);' : 'background: white; color: #475569;'}" onclick="switchStationDirection('${standardName}', 'hopyeong')">
+          <button style="flex: 1; padding: 8px 4px; font-size: 11.5px; font-weight: 800; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; ${isHopyeong ? 'background: #0284c7; color: white; box-shadow: 0 2px 5px rgba(2,132,199,0.3);' : 'background: white; color: #475569;'}" onclick="switchStationDirection('${safeStdName}', 'hopyeong')">
             🏢 호평동·수진사 방면
           </button>
-          <button style="flex: 1; padding: 8px 4px; font-size: 11.5px; font-weight: 800; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; ${!isHopyeong ? 'background: #0284c7; color: white; box-shadow: 0 2px 5px rgba(2,132,199,0.3);' : 'background: white; color: #475569;'}" onclick="switchStationDirection('${standardName}', 'seoul')">
+          <button style="flex: 1; padding: 8px 4px; font-size: 11.5px; font-weight: 800; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; ${!isHopyeong ? 'background: #0284c7; color: white; box-shadow: 0 2px 5px rgba(2,132,199,0.3);' : 'background: white; color: #475569;'}" onclick="switchStationDirection('${safeStdName}', 'seoul')">
             🏙️ 서울·잠실·청량리 방면
           </button>
         </div>
+        ` : ''}
 
         <div style="display: flex; gap: 6px;">
-          <button class="btn-primary" style="flex: 2; padding: 10px; font-size: 12px; font-weight: 800; background: #0284c7;" onclick="saveTransitRouteDirect('${standardName}', '${isHopyeong ? '호평동·수진사 방면' : '청량리·잠실 서울 방면'}')">
-            ⭐ [${standardName}] ${isHopyeong ? '호평동 방면' : '서울 방면'} 즐겨찾기 저장
+          <button class="btn-primary" style="flex: 2; padding: 10px; font-size: 12px; font-weight: 800; background: #0284c7;" onclick="saveTransitRouteDirect('${safeStdName}', '${curatedMode ? (isHopyeong ? '호평동·수진사 방면' : '청량리·잠실 서울 방면') : escapeHtml(areaShort) + ' 방면'}')">
+            ⭐ [${escapeHtml(standardName)}] 즐겨찾기 저장
           </button>
           <button class="btn-secondary" style="flex: 1; padding: 10px; font-size: 11px;" onclick="resetTransitRouteBuilder()">
             🔄 초기화
@@ -2649,24 +2814,27 @@ async function selectBusStopOnMap(stop, customDirection = null) {
     if (arrivals.length > 0) {
       extraHtml += `
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-          <span style="font-weight: 800; color: #0369a1; font-size: 12px;">🚌 실시간 도착 예정 버스 (${arrivals.length}대 - ${isHopyeong ? '호평동 방면' : '서울 방면'})</span>
+          <span style="font-weight: 800; color: #0369a1; font-size: 12px;">🚌 실시간 도착 예정 버스 (${arrivals.length}대${curatedMode ? (isHopyeong ? ' - 호평동 방면' : ' - 서울 방면') : ' - TAGO 실시간'})</span>
           <span style="font-size: 11px; color: #64748b;">🔔 터치 시 10/5/3분 알림</span>
         </div>
         <div class="station-arrival-list">
           ${arrivals.map(a => {
             const hasAlarm = AppState.busAlerts.some(al => al.routeNo === a.route_no && al.stationName === standardName);
+            const safeRoute = String(a.route_no || '').replace(/'/g, "\\'");
+            const safeDest = String(a.destination || '').replace(/'/g, "\\'");
+            const safeTime = String(a.remain_time || '').replace(/'/g, "\\'");
             return `
-              <div class="station-arrival-item" style="cursor: pointer;" onclick="openBusAlarmModal({ route_no: '${a.route_no}', station_name: '${standardName}', destination: '${a.destination}', remain_time: '${a.remain_time}' })">
+              <div class="station-arrival-item" style="cursor: pointer;" onclick="openBusAlarmModal({ route_no: '${safeRoute}', station_name: '${safeStdName}', destination: '${safeDest}', remain_time: '${safeTime}' })">
                 <div>
-                  <span class="bus-num-pill" style="background: ${a.badge_color};">${a.route_no}</span>
-                  <span style="font-weight: 700; margin-left: 6px; color: #334155; font-size: 12px;">➔ ${a.destination}</span>
+                  <span class="bus-num-pill" style="background: ${a.badge_color};">${escapeHtml(a.route_no)}</span>
+                  <span style="font-weight: 700; margin-left: 6px; color: #334155; font-size: 12px;">➔ ${escapeHtml(a.destination)}</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                   <div style="text-align: right;">
-                    <div style="font-weight: 800; color: #e11d48; font-size: 12px;">${a.remain_time}</div>
-                    <div style="font-size: 10px; color: #64748b;">${a.remain_stops}</div>
+                    <div style="font-weight: 800; color: #e11d48; font-size: 12px;">${escapeHtml(a.remain_time)}</div>
+                    <div style="font-size: 10px; color: #64748b;">${escapeHtml(a.remain_stops)}</div>
                   </div>
-                  <button class="btn-alarm-set ${hasAlarm ? 'active' : ''}" onclick="event.stopPropagation(); openBusAlarmModal({ route_no: '${a.route_no}', station_name: '${standardName}', destination: '${a.destination}', remain_time: '${a.remain_time}' })">
+                  <button class="btn-alarm-set ${hasAlarm ? 'active' : ''}" onclick="event.stopPropagation(); openBusAlarmModal({ route_no: '${safeRoute}', station_name: '${safeStdName}', destination: '${safeDest}', remain_time: '${safeTime}' })">
                     ${hasAlarm ? '🔔 예약됨' : '🔔 알림'}
                   </button>
                 </div>
@@ -2676,8 +2844,14 @@ async function selectBusStopOnMap(stop, customDirection = null) {
         </div>
       `;
     } else {
+      const kUrl = data.kakao_map_url || `https://map.kakao.com/link/search/${encodeURIComponent(standardName + ' 버스정류장')}`;
       extraHtml += `
-        <div style="color: #64748b; font-size: 11px;">현재 운행 중인 도착 예정 버스가 없습니다.</div>
+        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 10px; font-size: 11.5px; color: #475569; line-height: 1.5;">
+          <div>${escapeHtml(data.fallback_notice || '현재 운행 중인 도착 예정 버스 정보가 없습니다.')}</div>
+          <a href="${kUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; margin-top: 8px; padding: 6px 12px; background: #fee500; color: #191919; border-radius: 8px; font-weight: 800; font-size: 11.5px; text-decoration: none;">
+            🗺️ 카카오맵에서 실시간 도착 보기
+          </a>
+        </div>
       `;
     }
 
@@ -2757,9 +2931,11 @@ function renderWeatherDetail(el) {
 }
 
 async function renderTransitDetail(el) {
+  const lat = (AppState.location && AppState.location.lat) ? AppState.location.lat : AppState.homeLocation.lat;
+  const lon = (AppState.location && AppState.location.lon) ? AppState.location.lon : AppState.homeLocation.lon;
   const [res, stopsRes] = await Promise.all([
     fetch("/api/transit"),
-    fetch("/api/transit/nearby-stops")
+    fetch(`/api/transit/nearby-stops?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`)
   ]);
   const routes = await res.json();
   const stops = await stopsRes.json();
@@ -2881,18 +3057,26 @@ async function renderTransitDetail(el) {
       `}
     </div>
 
-    <!-- 2순위: 내 주변 정류소 실시간 조회 -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding-top: 10px; border-top: 1px solid #e2e8f0;">
-      <span style="font-size: 13px; font-weight: 800; color: #0f172a;">📍 내 주변 버스 정류소 (터치 시 실시간 도착 버스 조회)</span>
-      <span style="font-size: 11px; color: #0284c7; font-weight: 700;">상단 🗺️ 지도에서도 선택 가능</span>
+    <!-- 2순위: 내 주변 정류소 · 지하철역 실시간 조회 -->
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-bottom: 8px; padding-top: 10px; border-top: 1px solid #e2e8f0; flex-wrap: wrap;">
+      <span style="font-size: 13px; font-weight: 800; color: #0f172a;">📍 ${escapeHtml((AppState.location && AppState.location.shortLabel) || '내 주변')} 정류소 · 지하철역</span>
+      <a href="https://map.kakao.com/link/search/${encodeURIComponent(((AppState.location && AppState.location.shortLabel) || '') + ' 버스정류장')}" target="_blank" rel="noopener noreferrer" style="font-size: 11px; background: #fee500; color: #191919; padding: 4px 8px; border-radius: 7px; font-weight: 800; text-decoration: none;">
+        🗺️ 주변 버스 (카카오맵)
+      </a>
     </div>
 
     <div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 12px;">
-      ${stops.map(s => `
-        <div style="flex: 0 0 auto; background: #f0f9ff; border: 1.5px solid #bae6fd; border-radius: 10px; padding: 7px 12px; font-size: 12px; cursor: pointer; transition: all 0.15s;" onclick="selectBusStopFromList('${s.name}')">
-          🚏 <strong>${s.name}</strong> <span style="font-size: 10px; color: #0284c7;">(${s.distance}m)</span>
+      ${stops.length > 0 ? stops.map((s, idx) => {
+        const dTxt = s.distance < 1000 ? `${s.distance}m` : `${(s.distance / 1000).toFixed(1)}km`;
+        const stopIcon = s.transit_kind === "SUBWAY" ? "🚇" : "🚏";
+        return `
+        <div style="flex: 0 0 auto; background: #f0f9ff; border: 1.5px solid #bae6fd; border-radius: 10px; padding: 7px 12px; font-size: 12px; cursor: pointer; transition: all 0.15s;" onclick="selectBusStopFromListByIdx(${idx})">
+          ${stopIcon} <strong>${escapeHtml(s.name)}</strong> <span style="font-size: 10px; color: #0284c7;">(${dTxt})</span>
         </div>
-      `).join("")}
+      `;
+      }).join("") : `
+        <div style="font-size: 12px; color: #64748b; padding: 6px;">현재 위치 주변에서 조회된 정류소가 없습니다. 위 카카오맵 버튼을 이용해 보세요.</div>
+      `}
     </div>
 
     <!-- 목록에서 선택한 주변 정류소 실시간 도착 버스 정보 영역 -->
@@ -2900,19 +3084,39 @@ async function renderTransitDetail(el) {
   `;
 }
 
-// 목록에서 정류소 탭 시 실시간 도착 버스 정보 노출 헬퍼
-async function selectBusStopFromList(stationName) {
+function selectBusStopFromListByIdx(idx) {
+  const stop = (AppState.cachedTransitStops || [])[idx];
+  if (!stop) return;
+  selectBusStopFromList(stop.name, stop);
+}
+window.selectBusStopFromListByIdx = selectBusStopFromListByIdx;
+
+// 목록에서 정류소 탭 시 실시간 도착 버스 정보 노출 헬퍼 (평내 + 전국 TAGO + 카카오맵 폴백 지원)
+async function selectBusStopFromList(stationName, stopObj = null) {
   const container = document.getElementById("listSelectedStopArrivals");
   if (!container) return;
+  const safeName = String(stationName || "").replace(/'/g, "\\'");
 
   container.innerHTML = `
     <div style="background: #f8fafc; border: 1.5px solid #0284c7; border-radius: 12px; padding: 12px; animation: fadeIn 0.2s;">
-      <div style="font-size: 12px; color: #64748b;">🚏 <strong>${stationName}</strong> 도착 정보 조회 중... 🚌</div>
+      <div style="font-size: 12px; color: #64748b;">🚏 <strong>${escapeHtml(stationName)}</strong> 도착 정보 조회 중... 🚌</div>
     </div>
   `;
 
   try {
-    const res = await fetch(`/api/transit/station-arrivals?station_name=${encodeURIComponent(stationName)}`);
+    const qs = new URLSearchParams({ station_name: stationName });
+    if (stopObj) {
+      if (stopObj.direction) qs.set("direction", stopObj.direction);
+      if (stopObj.node_id || stopObj.id) qs.set("station_id", String(stopObj.node_id || stopObj.id));
+      if (stopObj.city_code) qs.set("city_code", String(stopObj.city_code));
+      if (stopObj.lat || stopObj.latitude) qs.set("lat", String(stopObj.lat || stopObj.latitude));
+      if (stopObj.lon || stopObj.longitude) qs.set("lon", String(stopObj.lon || stopObj.longitude));
+    } else if (AppState.location) {
+      qs.set("lat", String(AppState.location.lat));
+      qs.set("lon", String(AppState.location.lon));
+    }
+
+    const res = await fetch(`/api/transit/station-arrivals?${qs.toString()}`);
     const data = await res.json();
     const arrivals = data.arrivals || [];
 
@@ -2920,24 +3124,27 @@ async function selectBusStopFromList(stationName) {
       container.innerHTML = `
         <div style="background: #f8fafc; border: 1.5px solid #0284c7; border-radius: 12px; padding: 12px; animation: fadeIn 0.2s;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <span style="font-size: 13px; font-weight: 800; color: #0284c7;">🚏 ${stationName} 실시간 도착 버스 (${arrivals.length}대)</span>
-            <button class="btn-mini btn-fav" onclick="selectStartStation('${stationName}')">+ 이 정류소로 새 루트 등록</button>
+            <span style="font-size: 13px; font-weight: 800; color: #0284c7;">🚏 ${escapeHtml(stationName)} 실시간 도착 버스 (${arrivals.length}대)</span>
+            <button class="btn-mini btn-fav" onclick="selectStartStation('${safeName}')">+ 이 정류소로 새 루트 등록</button>
           </div>
           <div class="station-arrival-list">
             ${arrivals.map(a => {
               const hasAlarm = AppState.busAlerts.some(al => al.routeNo === a.route_no && al.stationName === stationName);
+              const safeRoute = String(a.route_no || '').replace(/'/g, "\\'");
+              const safeDest = String(a.destination || '').replace(/'/g, "\\'");
+              const safeTime = String(a.remain_time || '').replace(/'/g, "\\'");
               return `
-                <div class="station-arrival-item" style="cursor: pointer;" onclick="openBusAlarmModal({ route_no: '${a.route_no}', station_name: '${stationName}', destination: '${a.destination}', remain_time: '${a.remain_time}' })">
+                <div class="station-arrival-item" style="cursor: pointer;" onclick="openBusAlarmModal({ route_no: '${safeRoute}', station_name: '${safeName}', destination: '${safeDest}', remain_time: '${safeTime}' })">
                   <div>
-                    <span class="bus-num-pill" style="background: ${a.badge_color};">${a.route_no}</span>
-                    <span style="font-weight: 700; margin-left: 6px; color: #334155;">➔ ${a.destination}</span>
+                    <span class="bus-num-pill" style="background: ${a.badge_color};">${escapeHtml(a.route_no)}</span>
+                    <span style="font-weight: 700; margin-left: 6px; color: #334155;">➔ ${escapeHtml(a.destination)}</span>
                   </div>
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <div style="text-align: right;">
-                      <span style="font-weight: 800; color: #e11d48;">${a.remain_time}</span>
-                      <span style="font-size: 10px; color: #64748b; margin-left: 4px;">(${a.remain_stops})</span>
+                      <span style="font-weight: 800; color: #e11d48;">${escapeHtml(a.remain_time)}</span>
+                      <span style="font-size: 10px; color: #64748b; margin-left: 4px;">(${escapeHtml(a.remain_stops)})</span>
                     </div>
-                    <button class="btn-alarm-set ${hasAlarm ? 'active' : ''}" onclick="event.stopPropagation(); openBusAlarmModal({ route_no: '${a.route_no}', station_name: '${stationName}', destination: '${a.destination}', remain_time: '${a.remain_time}' })">
+                    <button class="btn-alarm-set ${hasAlarm ? 'active' : ''}" onclick="event.stopPropagation(); openBusAlarmModal({ route_no: '${safeRoute}', station_name: '${safeName}', destination: '${safeDest}', remain_time: '${safeTime}' })">
                       ${hasAlarm ? '🔔 예약됨' : '🔔 알림'}
                     </button>
                   </div>
@@ -2948,10 +3155,16 @@ async function selectBusStopFromList(stationName) {
         </div>
       `;
     } else {
+      const kUrl = data.kakao_map_url || `https://map.kakao.com/link/search/${encodeURIComponent(stationName + ' 버스정류장')}`;
       container.innerHTML = `
-        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 12px; padding: 10px; font-size: 12px; color: #64748b;">
-          🚏 ${stationName}: 현재 운행 중인 버스 정보가 없습니다.
-          <button class="btn-mini btn-fav" style="margin-left: 8px;" onclick="selectStartStation('${stationName}')">+ 루트 등록</button>
+        <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 12px; padding: 12px; font-size: 12px; color: #475569; line-height: 1.5;">
+          <div>🚏 <strong>${escapeHtml(stationName)}</strong>: ${escapeHtml(data.fallback_notice || '현재 운행 중인 버스 정보가 없습니다.')}</div>
+          <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+            <a href="${kUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 6px 12px; background: #fee500; color: #191919; border-radius: 8px; font-weight: 800; font-size: 11.5px; text-decoration: none;">
+              🗺️ 카카오맵 실시간 도착 보기
+            </a>
+            <button class="btn-mini btn-fav" onclick="selectStartStation('${safeName}')">+ 루트 등록</button>
+          </div>
         </div>
       `;
     }
@@ -2961,7 +3174,9 @@ async function selectBusStopFromList(stationName) {
 }
 
 async function renderHospitalDetail(el) {
-  const res = await fetch("/api/hospital");
+  const lat = (AppState.location && AppState.location.lat) ? AppState.location.lat : AppState.homeLocation.lat;
+  const lon = (AppState.location && AppState.location.lon) ? AppState.location.lon : AppState.homeLocation.lon;
+  const res = await fetch(`/api/hospital?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
   const data = await res.json();
   AppState.cachedHospitals = data.items || [];
   AppState.currentHospitalFilter = "ALL";
@@ -2976,15 +3191,17 @@ function renderHospitalDetailContent(el, currentFilter = "ALL", searchQuery = ""
     items = items.filter(h =>
       (h.name && h.name.toLowerCase().includes(qLower)) ||
       (h.address && h.address.toLowerCase().includes(qLower)) ||
-      (h.badge && h.badge.toLowerCase().includes(qLower))
+      (h.badge && h.badge.toLowerCase().includes(qLower)) ||
+      (h.type && h.type.toLowerCase().includes(qLower))
     );
   }
   const favList = AppState.favoritePlaces || [];
+  const areaLabel = (AppState.location && AppState.location.shortLabel) || "내 주변";
 
   el.innerHTML = `
     <!-- 약국 / 병원 검색창 -->
     <div style="display: flex; gap: 6px; margin-bottom: 10px;">
-      <input type="text" id="inputSearchHospitalQuery" placeholder="약국명 또는 병원 검색 (예: 평내약국, 소아과)" value="${searchQuery}" style="flex: 1; padding: 9px 12px; border: 1.5px solid #cbd5e1; border-radius: 10px; font-size: 13px; outline: none;" onkeypress="if(event.key==='Enter') executeHospitalSearch()">
+      <input type="text" id="inputSearchHospitalQuery" placeholder="${escapeHtml(areaLabel)} 약국·병원 검색 (예: 소아과, 내과, 약국)" value="${escapeHtml(searchQuery)}" style="flex: 1; padding: 9px 12px; border: 1.5px solid #cbd5e1; border-radius: 10px; font-size: 13px; outline: none;" onkeypress="if(event.key==='Enter') executeHospitalSearch()">
       <button class="btn-primary" style="padding: 9px 14px; font-size: 12px; font-weight: 800; border-radius: 10px; background: #0284c7;" onclick="executeHospitalSearch()">검색</button>
     </div>
 
@@ -2995,31 +3212,34 @@ function renderHospitalDetailContent(el, currentFilter = "ALL", searchQuery = ""
     </div>
 
     <div style="font-size: 11px; color: #0284c7; font-weight: 700; margin-bottom: 8px;">
-      💡 약국이나 병원을 터치하면 <b>지도 위치로 이동하고 단 1곳만 핀이 꽂혀 즐겨찾기를 바로 체크</b>할 수 있습니다!
+      💡 <b>${escapeHtml(areaLabel)}</b> 기준 거리순 정렬 · 항목을 터치하면 지도 위치와 경로선이 표시됩니다!
     </div>
 
     <div style="display: flex; flex-direction: column; gap: 8px;">
       ${items.length === 0 ? `
         <div style="text-align: center; padding: 24px; color: #64748b; font-size: 12.5px; background: #f8fafc; border-radius: 12px; border: 1px dashed #cbd5e1;">
-          '<b>${searchQuery}</b>' 검색 결과가 없습니다.
+          ${searchQuery ? `'<b>${escapeHtml(searchQuery)}</b>' 검색 결과가 없습니다.` : '해당 조건의 병원·약국 정보가 없습니다.'}
         </div>
-      ` : items.map((h, idx) => {
+      ` : items.map((h) => {
         const isFav = favList.some(p => p.name === h.name);
         const safeName = (h.name || '').replace(/'/g, "\\'");
         return `
           <div class="item-card" style="cursor: pointer;" onclick="focusHospitalByName('${safeName}')">
             <div class="item-card-top">
-              <span class="item-name" style="color: #0f172a;">${h.name}</span>
-              <span class="item-badge" style="background: ${h.badge_color}; color: white;">${h.badge}</span>
+              <span class="item-name" style="color: #0f172a;">${escapeHtml(h.name)}</span>
+              <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                ${h.distance ? `<span style="font-size: 10.5px; font-weight: 800; color: #0284c7; background: #e0f2fe; padding: 2px 6px; border-radius: 6px;">${escapeHtml(h.distance)}</span>` : ''}
+                <span class="item-badge" style="background: ${h.badge_color}; color: white;">${escapeHtml(h.badge)}</span>
+              </div>
             </div>
-            <div class="item-desc">주말: ${h.weekend_info}</div>
-            <div class="item-desc" style="color: #64748b; font-size: 11px;">📍 ${h.address}</div>
+            <div class="item-desc" style="font-weight: 700; color: #334155;">${escapeHtml(h.status_badge || '')} · ${escapeHtml(h.weekend_info || '')}</div>
+            <div class="item-desc" style="color: #64748b; font-size: 11px;">📍 ${escapeHtml(h.address || '')}</div>
             <div class="item-action-row" onclick="event.stopPropagation()">
               <button class="btn-mini btn-fav" style="background: #e0f2fe; color: #0369a1;" onclick="focusHospitalByName('${safeName}')">🗺️ 지도 위치 보기</button>
               <button class="btn-mini btn-fav ${isFav ? 'is-fav' : ''}" style="background: ${isFav ? '#fffbeb' : '#ecfdf5'}; color: ${isFav ? '#b45309' : '#047857'}; border: 1px solid ${isFav ? '#fde68a' : '#a7f3d0'};" onclick="quickAddFavoriteHospitalByName('${safeName}')">
                 ${isFav ? '★ 즐겨찾기 취소' : '☆ 즐겨찾기'}
               </button>
-              ${h.phone ? `<a href="tel:${h.phone}" class="btn-mini btn-call">📞 전화</a>` : ''}
+              ${h.phone ? `<a href="tel:${escapeHtml(h.phone)}" class="btn-mini btn-call">📞 전화</a>` : ''}
             </div>
           </div>
         `;
@@ -3078,7 +3298,9 @@ async function filterHospitalList(filterType) {
   const contentEl = document.getElementById("sheetContent");
   if (!contentEl) return;
   try {
-    const res = await fetch(`/api/hospital?filter_type=${filterType}`);
+    const lat = (AppState.location && AppState.location.lat) ? AppState.location.lat : AppState.homeLocation.lat;
+    const lon = (AppState.location && AppState.location.lon) ? AppState.location.lon : AppState.homeLocation.lon;
+    const res = await fetch(`/api/hospital?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&filter_type=${encodeURIComponent(filterType)}`);
     const data = await res.json();
     AppState.cachedHospitals = data.items || [];
     renderHospitalDetailContent(contentEl, filterType, "");
@@ -3117,7 +3339,7 @@ async function renderRestaurantDetail(el) {
     </div>
 
     <div style="font-size: 11px; color: #0284c7; font-weight: 700; margin-bottom: 8px;">
-      💡 식당 카드를 터치하면 <b>지도 위치로 이동하여 단 1곳만 강조 핀</b>으로 표시되고 우리 집에서의 거리/경로선이 그려집니다!
+      💡 <b>${escapeHtml((AppState.location && AppState.location.shortLabel) || "현재 위치")}</b> 인근 맛집 · 카드를 터치하면 지도 위치와 ${escapeHtml(getOriginShortName())}에서의 거리/경로선이 표시됩니다!
     </div>
 
     <div id="restaurantListContainer" style="display: flex; flex-direction: column; gap: 8px;">
@@ -3545,7 +3767,10 @@ function initLeafletSafetyMap(container, children) {
   }
   container.replaceChildren();
 
-  const map = L.map(container).setView([AppState.location.lat, AppState.location.lon], 15);
+  const homeLat = AppState.homeLocation.lat;
+  const homeLon = AppState.homeLocation.lon;
+
+  const map = L.map(container).setView([homeLat, homeLon], 15);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '© OpenStreetMap'
@@ -3553,19 +3778,19 @@ function initLeafletSafetyMap(container, children) {
 
   AppState.leafletSafetyMap = map;
 
-  // 1. 우리 집 마커
+  // 1. 우리 집 마커 (고정 안심 거점: 부모 외출 위치에 영향받지 않음)
   const homeIcon = L.divIcon({
     className: 'custom-home-pin',
     html: '<div style="background:#0f172a;color:white;padding:4px 8px;border-radius:10px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:1px solid #ffffff;">🏡 우리 집</div>',
     iconSize: [60, 24],
     iconAnchor: [30, 12]
   });
-  L.marker([AppState.location.lat, AppState.location.lon], { icon: homeIcon })
+  L.marker([homeLat, homeLon], { icon: homeIcon })
     .addTo(map)
     .bindPopup('<b>🏡 우리 집</b><br>평내유진마젤란 안심 거점');
 
   // 안심존 원형 반경 (250m)
-  L.circle([AppState.location.lat, AppState.location.lon], {
+  L.circle([homeLat, homeLon], {
     radius: 250,
     color: '#10b981',
     fillColor: '#10b981',
@@ -3573,7 +3798,7 @@ function initLeafletSafetyMap(container, children) {
   }).addTo(map).bindPopup('🛡️ 유진마젤란 안심 구역 (반경 250m)');
 
   // 2. 아이들(첫째딸, 둘째딸) 전체 마커 렌더링
-  const boundsPoints = [[AppState.location.lat, AppState.location.lon]];
+  const boundsPoints = [[homeLat, homeLon]];
 
   (children || []).forEach(c => {
     if (!c.latitude || !c.longitude) return;
@@ -3615,8 +3840,8 @@ function initLeafletSafetyMap(container, children) {
 }
 
 function initKakaoSafetyMap(container, children) {
-  const centerLat = AppState.location.lat;
-  const centerLon = AppState.location.lon;
+  const centerLat = AppState.homeLocation.lat;
+  const centerLon = AppState.homeLocation.lon;
 
   const options = {
     center: new kakao.maps.LatLng(centerLat, centerLon),
@@ -3625,9 +3850,9 @@ function initKakaoSafetyMap(container, children) {
 
   AppState.kakaoSafetyMap = new kakao.maps.Map(container, options);
 
-  // 1. 우리 집 마커
+  // 1. 우리 집 마커 (고정 안심 거점: 부모 외출 위치에 영향받지 않음)
   const homeMarker = new kakao.maps.Marker({
-    position: new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon),
+    position: new kakao.maps.LatLng(centerLat, centerLon),
     map: AppState.kakaoSafetyMap
   });
   new kakao.maps.CustomOverlay({
@@ -3639,7 +3864,7 @@ function initKakaoSafetyMap(container, children) {
 
   // 집 안심 구역 원 (반경 250m)
   new kakao.maps.Circle({
-    center: new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon),
+    center: new kakao.maps.LatLng(centerLat, centerLon),
     radius: 250,
     strokeWeight: 2,
     strokeColor: '#10b981',
@@ -3651,7 +3876,7 @@ function initKakaoSafetyMap(container, children) {
 
   // 2. 아이들(첫째딸, 둘째딸) 실시간/안심 핀 전체 표출 및 한눈에 보기 바운드 설정
   const bounds = new kakao.maps.LatLngBounds();
-  bounds.extend(new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon));
+  bounds.extend(new kakao.maps.LatLng(centerLat, centerLon));
 
   (children || []).forEach(c => {
     if (!c.latitude || !c.longitude) return;
@@ -4181,14 +4406,14 @@ async function openChatMessageLocationMap(lat, lon, landmark, address, senderNam
   const addrEl = document.getElementById("chatMapAddress");
   if (addrEl) addrEl.textContent = address;
 
-  // 2. 우리집과의 거리 계산 및 뱃지 표출
+  // 2. 우리집(고정 거점)과의 거리 계산 및 뱃지 표출
+  const hLat = AppState.homeLocation.lat;
+  const hLon = AppState.homeLocation.lon;
   const distEl = document.getElementById("chatMapDistanceBadge");
   if (distEl) {
-    const R = 6371000;
-    const dLat = (lat - AppState.location.lat) * Math.PI / 180;
-    const dLon = (lon - AppState.location.lon) * Math.PI / 180;
-    const a = Math.sin(dLat/2)**2 + Math.cos(AppState.location.lat * Math.PI / 180) * Math.cos(lat * Math.PI / 180) * Math.sin(dLon/2)**2;
-    const dMeters = Math.round(2 * R * Math.asin(Math.sqrt(a)));
+    const dMeters = typeof calcHaversineMeters === "function"
+      ? calcHaversineMeters(hLat, hLon, lat, lon)
+      : 0;
     const dText = dMeters >= 1000 ? `${(dMeters / 1000).toFixed(1)}km` : `${dMeters}m`;
     distEl.textContent = `🏡 우리 집에서 약 ${dText} 거리`;
   }
@@ -4228,8 +4453,8 @@ async function openChatMessageLocationMap(lat, lon, landmark, address, senderNam
     });
     targetOverlay.setMap(chatMessageKakaoMapInstance);
 
-    // 우리집 마커도 함께 표시
-    const homePos = new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon);
+    // 우리집 마커도 함께 표시 (고정 거점)
+    const homePos = new kakao.maps.LatLng(hLat, hLon);
     const homeMarker = new kakao.maps.Marker({
       position: homePos,
       map: chatMessageKakaoMapInstance
@@ -4274,7 +4499,7 @@ async function openChatMessageLocationMap(lat, lon, landmark, address, senderNam
       iconSize: [60, 22],
       iconAnchor: [30, 11]
     });
-    L.marker([AppState.location.lat, AppState.location.lon], { icon: homeIcon }).addTo(chatMessageLeafletMapInstance);
+    L.marker([hLat, hLon], { icon: homeIcon }).addTo(chatMessageLeafletMapInstance);
 
     setTimeout(() => {
       if (chatMessageLeafletMapInstance) {
@@ -4900,20 +5125,50 @@ function triggerBusArrivalNotification(alertItem, stage, minsLeft, matchedBus) {
 }
 
 function refreshMyLocation() {
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        AppState.location.lat = pos.coords.latitude;
-        AppState.location.lon = pos.coords.longitude;
-        refreshData();
-        alert("📍 내 현재 위치로 동네 정보가 갱신되었습니다!");
-      },
-      () => alert("GPS 위치 권한을 확인해 주세요.")
-    );
+  const btn = document.getElementById("btnRefreshLoc");
+  if (!navigator.geolocation) {
+    if (typeof showToast === "function") showToast("이 기기에서는 GPS 위치 조회를 지원하지 않습니다.", "error");
+    return;
   }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ 확인중...";
+  }
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      try {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        await syncLocationAddress(lat, lon, true);
+        await refreshData(true);
+        await reloadOpenCategorySheet();
+        if (typeof showToast === "function") {
+          showToast(`📍 '${AppState.location.address}' 기준으로 날씨·교통·병원·약국·식당이 갱신되었습니다!`, "info");
+        }
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "🔄 현위치";
+        }
+      }
+    },
+    () => {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "🔄 현위치";
+      }
+      if (typeof showToast === "function") {
+        showToast("GPS 위치 권한을 허용해 주세요. (브라우저 설정 확인)", "error");
+      } else {
+        alert("GPS 위치 권한을 확인해 주세요.");
+      }
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+  );
 }
 
 // 전역 함수 안전 바인딩 (HTML 인라인 이벤트 핸들러 보장)
+window.switchToHomeLocation = switchToHomeLocation;
 window.deleteTransitRoute = deleteTransitRoute;
 window.deleteFavoritePlace = deleteFavoritePlace;
 window.deleteFavoriteRestaurant = deleteFavoriteRestaurant;

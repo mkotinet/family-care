@@ -2,14 +2,18 @@ from datetime import datetime
 import zoneinfo
 from backend.config import TIMEZONE
 from backend.database import get_cached_data, set_cached_data
+from backend.services.location import reverse_geocode
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
 async def get_health_alerts(lat: float, lon: float):
-    cache_key = "health_alerts_real_v3"
+    cache_key = f"health_alerts_real_v4_{round(lat, 2)}_{round(lon, 2)}"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
+
+    geo = await reverse_geocode(lat, lon)
+    region_label = geo.get("short_label") or "현재 위치"
 
     now = datetime.now(KST)
     month = now.month
@@ -65,7 +69,8 @@ async def get_health_alerts(lat: float, lon: float):
     ]
 
     result = {
-        "summary": "남양주시 평내동 기준 실시간 질병/알레르기 통합 예보",
+        "summary": f"{region_label} 기준 실시간 질병/알레르기 통합 예보",
+        "region_label": region_label,
         "updated_at": now.strftime("%Y-%m-%d %H:%M"),
         "alerts": alerts
     }

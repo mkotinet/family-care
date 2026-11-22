@@ -1,14 +1,14 @@
 /**
- * 우리가족챙기기 (Family Care) - PWA Service Worker (v1.7.0)
+ * 우리가족챙기기 (Family Care) - PWA Service Worker (v1.8.0)
  * Handles App Shell Precaching, Network-First Runtime Caching, Offline Fallback & Push Notifications
  */
 
-const CACHE_NAME = 'family-care-pwa-v1.7.0';
+const CACHE_NAME = 'family-care-pwa-v1.8.0';
 const PRECACHE_URLS = [
   '/',
-  '/static/style.css?v=1.7.0',
-  '/static/js/core.js?v=1.7.0',
-  '/static/app.js?v=1.7.0',
+  '/static/style.css?v=1.8.0',
+  '/static/js/core.js?v=1.8.0',
+  '/static/app.js?v=1.8.0',
   '/static/icons/icon-192.png',
   '/static/icons/icon-512.png',
   '/static/icons/apple-touch-icon.png'

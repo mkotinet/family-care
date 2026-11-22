@@ -169,6 +169,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   background: var(--bg-glass);
   backdrop-filter: blur(12px);
   padding: 10px 14px;
@@ -185,6 +186,23 @@ body {
   font-size: 13px;
   font-weight: 700;
   color: #334155;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loc-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.loc-btn-home {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
 }
 
 .loc-btn {

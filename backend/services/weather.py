@@ -7,6 +7,7 @@ from backend.coords import wgs84_to_kma_grid
 from backend.database import get_cached_data, set_cached_data
 from backend.http_client import async_http_get_json
 from backend.mock_data import get_simulated_weather
+from backend.services.location import reverse_geocode
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
@@ -124,14 +125,19 @@ async def get_weather_data(lat: float, lon: float):
         }
         fcst_full_url = f"{fcst_url}?{urllib.parse.urlencode(fcst_params)}"
 
-        # 3. 에어코리아 대기오염정보
+        # 3. 에어코리아 대기오염정보 (현재 좌표 행정구역 기반 동적 시/도 조회)
+        geo = await reverse_geocode(lat, lon)
+        air_sido = geo.get("sido_short") or "경기"
+        air_sigungu = (geo.get("sigungu") or "").replace("시", "").replace("구", "").replace("군", "")
+        air_dong = (geo.get("dong") or "").replace("동", "").replace("읍", "").replace("면", "")
+
         air_url = "https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty"
         air_params = {
             "serviceKey": DATA_GO_KR_API_KEY,
             "returnType": "json",
-            "numOfRows": "40",
+            "numOfRows": "60",
             "pageNo": "1",
-            "sidoName": "경기",
+            "sidoName": air_sido,
             "ver": "1.0"
         }
         air_full_url = f"{air_url}?{urllib.parse.urlencode(air_params)}"
@@ -258,15 +264,24 @@ async def get_weather_data(lat: float, lon: float):
                     "rain_prob": max_pop
                 })
 
-        # 3) 에어코리아 파싱
+        # 3) 에어코리아 파싱 (현재 위치 동/시군구 측정소 우선 매칭)
         if isinstance(air_res, dict):
             air_items = air_res.get("response", {}).get("body", {}).get("items", [])
             target_station = None
-            for item in air_items:
-                st_name = item.get("stationName", "")
-                if "남양주" in st_name or "평내" in st_name or "화도" in st_name or "진접" in st_name:
-                    target_station = item
+            match_hints = [h for h in [air_dong, air_sigungu] if h and len(h) >= 2]
+            for hint in match_hints:
+                for item in air_items:
+                    st_name = item.get("stationName", "")
+                    if hint in st_name and item.get("pm10Value") not in (None, "", "-"):
+                        target_station = item
+                        break
+                if target_station:
                     break
+            if not target_station:
+                for item in air_items:
+                    if item.get("pm10Value") not in (None, "", "-"):
+                        target_station = item
+                        break
             if not target_station and air_items:
                 target_station = air_items[0]
 

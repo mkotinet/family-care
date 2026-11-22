@@ -200,6 +200,20 @@ def init_db():
     )
     """)
 
+    # 9. 보안 감사 로그 테이블 (기본지침 제7조: 로그인·중요 작업 KST 감사 로깅, 자동 로테이션)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT,
+        action TEXT NOT NULL,
+        status TEXT NOT NULL,
+        detail TEXT,
+        client_ip TEXT,
+        user_agent TEXT,
+        created_at TEXT NOT NULL
+    )
+    """)
+
     # 4대 공식 가족 회원 시딩/업데이트
     now_kst = datetime.now(KST).isoformat()
     for acc in FAMILY_ACCOUNTS:
@@ -280,3 +294,39 @@ def delete_cached_data(cache_key_prefix: str):
     cursor.execute("DELETE FROM api_cache WHERE cache_key LIKE ?", (f"{cache_key_prefix}%",))
     conn.commit()
     conn.close()
+
+# 보안 감사 로그 기록 (최대 1,000건 자동 로테이션)
+def write_audit_log(username: str, action: str, status: str, detail: str = "", client_ip: str = "", user_agent: str = ""):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        now_kst = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
+        cursor.execute("""
+        INSERT INTO audit_logs (username, action, status, detail, client_ip, user_agent, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            (username or "anonymous")[:64],
+            (action or "UNKNOWN")[:64],
+            (status or "INFO")[:32],
+            (detail or "")[:300],
+            (client_ip or "")[:64],
+            (user_agent or "")[:200],
+            now_kst
+        ))
+        cursor.execute("""
+        DELETE FROM audit_logs
+        WHERE id NOT IN (SELECT id FROM audit_logs ORDER BY id DESC LIMIT 1000)
+        """)
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+def get_audit_logs(limit: int = 100):
+    safe_limit = max(1, min(int(limit or 100), 500))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM audit_logs ORDER BY id DESC LIMIT ?", (safe_limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

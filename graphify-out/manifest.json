@@ -12,15 +12,15 @@
     "semantic_hash": ""
   },
   "backend/database.py": {
-    "mtime": 1795306562.5857549,
-    "seen": 1795306839.764433,
-    "ast_hash": "719462ab7b6e1314ae08f84e9d068bbd",
+    "mtime": 1795347772.3325198,
+    "seen": 1795348236.988853,
+    "ast_hash": "04a4998419afbf6558c1323d60e41a51",
     "semantic_hash": ""
   },
   "backend/main.py": {
-    "mtime": 1795347287.4018543,
-    "seen": 1795347537.5790699,
-    "ast_hash": "3dd6220985d27f6b6ba076bde817989b",
+    "mtime": 1795347864.9032047,
+    "seen": 1795348236.988854,
+    "ast_hash": "aaaa9a77141d1dcb6f06de1617a0deb5",
     "semantic_hash": ""
   },
   "backend/mock_data.py": {
@@ -30,9 +30,9 @@
     "semantic_hash": ""
   },
   "backend/services/auth.py": {
-    "mtime": 1795312849.8316832,
-    "seen": 1795313528.262939,
-    "ast_hash": "6b2ba0fc4407fd2343bf16fd4be097c4",
+    "mtime": 1795347776.063217,
+    "seen": 1795348236.988856,
+    "ast_hash": "e3dc984bc950cd7c0aa3e785caf20889",
     "semantic_hash": ""
   },
   "backend/services/chat.py": {
@@ -96,9 +96,9 @@
     "semantic_hash": ""
   },
   "frontend/static/app.js": {
-    "mtime": 1795347376.7346954,
-    "seen": 1795347537.579086,
-    "ast_hash": "d0632b02633c151722d8280392b96c85",
+    "mtime": 1795348067.2976272,
+    "seen": 1795348236.98887,
+    "ast_hash": "715a7188630e431bda3982bb3d5ee626",
     "semantic_hash": ""
   },
   "frontend/static/manifest.json": {
@@ -108,15 +108,15 @@
     "semantic_hash": ""
   },
   "frontend/static/sw.js": {
-    "mtime": 1795347380.7809534,
-    "seen": 1795347537.579088,
-    "ast_hash": "0dea385a745a993f7035e5667254c2e2",
+    "mtime": 1795347922.4571054,
+    "seen": 1795348236.988872,
+    "ast_hash": "8222b2e5f2a849c6ccffeed7daedbabc",
     "semantic_hash": ""
   },
   "version.json": {
-    "mtime": 1795347382.968483,
-    "seen": 1795347537.579089,
-    "ast_hash": "62abe055060aafa5ff249871bdffd26a",
+    "mtime": 1795347924.6887593,
+    "seen": 1795348236.988874,
+    "ast_hash": "b3b1e24324cc955a785b2aafbef08fa4",
     "semantic_hash": ""
   },
   "README.md": {
@@ -126,9 +126,9 @@
     "semantic_hash": ""
   },
   "frontend/static/index.html": {
-    "mtime": 1795347374.5471125,
-    "seen": 1795347537.5790908,
-    "ast_hash": "5e8e86571571e1666bcb2337b48752e8",
+    "mtime": 1795347920.0964723,
+    "seen": 1795348236.988876,
+    "ast_hash": "1f3613bc8af2fe3cbaf378e52250409f",
     "semantic_hash": ""
   },
   "requirements.txt": {
@@ -138,21 +138,21 @@
     "semantic_hash": ""
   },
   "\uae30\uc220\ub808\ud3ec\ud2b8.md": {
-    "mtime": 1795347514.623242,
-    "seen": 1795347537.579094,
-    "ast_hash": "d0053ba88ee200538392fb90136b6d81",
+    "mtime": 1795348208.0319664,
+    "seen": 1795348236.9888792,
+    "ast_hash": "1a6f55e327a3f55f1462b91a304f609b",
     "semantic_hash": ""
   },
   "\uc81c\uc791\ud788\uc2a4\ud1a0\ub9ac.md": {
-    "mtime": 1795347517.725811,
-    "seen": 1795347537.5790951,
-    "ast_hash": "75f0e4f57434f24756a00da10a873be1",
+    "mtime": 1795348210.3436449,
+    "seen": 1795348236.98888,
+    "ast_hash": "dbfeda2259c3baba438c03ddaec880fe",
     "semantic_hash": ""
   },
   "\ud2b8\ub7ec\ube14\uc288\ud305.md": {
-    "mtime": 1795347512.5290244,
-    "seen": 1795347537.579096,
-    "ast_hash": "3fa67c3c636b17aa2a08e8b5563986a8",
+    "mtime": 1795348205.3065352,
+    "seen": 1795348236.9888809,
+    "ast_hash": "c45467df5b40c8a66710fa79a04f3c1e",
     "semantic_hash": ""
   },
   "frontend/static/icons/apple-touch-icon.png": {

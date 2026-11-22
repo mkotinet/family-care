@@ -3,6 +3,74 @@
  * 기능: 날씨 상세 타임라인, 카카오 지도 연동, 4인 가족 인증(하루퀴즈 연동), 실시간 아이 안심위치, 가족 전용 채팅방
  */
 
+// [Phase 2 보안] HTML 특수문자 이스케이프 (Stored XSS 원천 차단)
+function escapeHtml(val) {
+  if (val === null || val === undefined) return "";
+  return String(val)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+window.escapeHtml = escapeHtml;
+
+// [Phase 2 보안] 비로그인 상태 보호 기능 접근 가드 (임의 계정 사칭 방지)
+function requireFamilyLogin(actionLabel = "이 기능") {
+  if (AppState.currentUser && AppState.token) return true;
+  if (typeof showToast === "function") {
+    showToast(`🔐 ${actionLabel}은(는) 가족 로그인 후 이용할 수 있습니다.`, "info");
+  }
+  if (typeof openLoginModal === "function") {
+    openLoginModal();
+  }
+  return false;
+}
+window.requireFamilyLogin = requireFamilyLogin;
+
+// [Phase 2 보안 & 제9조 영구 세션 보호] 전역 /api/* Authorization 자동 주입 + 명시적 401만 세션 파기
+(function installAuthFetchInterceptor() {
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async function (input, init = {}) {
+    const url = typeof input === "string" ? input : (input && input.url ? input.url : "");
+    const isSameOriginApi = url.startsWith("/api/") || url.startsWith(window.location.origin + "/api/");
+    const nextInit = Object.assign({}, init);
+
+    if (isSameOriginApi) {
+      const token = (typeof AppState !== "undefined" && AppState.token) || localStorage.getItem("fc_token");
+      if (token) {
+        const headers = new Headers(nextInit.headers || (input instanceof Request ? input.headers : undefined));
+        if (!headers.has("Authorization")) {
+          headers.set("Authorization", `Bearer ${token}`);
+        }
+        nextInit.headers = headers;
+      }
+    }
+
+    const res = await nativeFetch(input, nextInit);
+
+    // 제9조 준수: 오직 서버로부터 명시적인 401 Unauthorized 수신 시에만 만료 토큰 정리 (오프라인/5xx는 세션 유지)
+    if (
+      isSameOriginApi &&
+      res.status === 401 &&
+      !url.includes("/api/auth/login") &&
+      !url.includes("/api/auth/me") &&
+      typeof AppState !== "undefined" &&
+      AppState.token
+    ) {
+      localStorage.removeItem("fc_token");
+      localStorage.removeItem("fc_user");
+      AppState.token = null;
+      AppState.currentUser = null;
+      if (typeof updateHeaderUserUI === "function") updateHeaderUserUI();
+      if (typeof showToast === "function") {
+        showToast("🔐 로그인 세션이 만료되었습니다. 다시 로그인해주세요.", "info");
+      }
+    }
+    return res;
+  };
+})();
+
 // PWA beforeinstallprompt 전역 최우선 캡처 (브라우저 최초 파이어링 누락 방지)
 window.deferredPwaPrompt = null;
 window.addEventListener("beforeinstallprompt", (e) => {
@@ -953,24 +1021,24 @@ async function loadFavorites() {
       const subTime = isReverse ? t.remain_time : (ret ? ret.remain_time : '운행 대기');
 
       transitItems.push(`
-        <div class="fav-card" onclick="focusFavoriteTransitRouteById(${t.id})">
+        <div class="fav-card" onclick="focusFavoriteTransitRouteById(${Number(t.id)})">
           <div class="fav-card-top" style="display: flex; justify-content: space-between; align-items: center;">
             <div style="display: flex; align-items: center; gap: 4px;">
-              <span class="fav-card-tag" style="background: #e0f2fe; color: #0369a1;">🚌 ${t.route_no}</span>
-              <button class="btn-mini" style="background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; font-size: 10px; padding: 1px 6px; border-radius: 6px; cursor: pointer;" title="양방향 전환" onclick="event.stopPropagation(); toggleFavTransitDirection(${t.id})">⇄ 왕복</button>
+              <span class="fav-card-tag" style="background: #e0f2fe; color: #0369a1;">🚌 ${escapeHtml(t.route_no)}</span>
+              <button class="btn-mini" style="background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; font-size: 10px; padding: 1px 6px; border-radius: 6px; cursor: pointer;" title="양방향 전환" onclick="event.stopPropagation(); toggleFavTransitDirection(${Number(t.id)})">⇄ 왕복</button>
             </div>
             <div style="display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation()">
-              <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick="openEditTransitModalById(${t.id})">✏️</button>
-              <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="삭제" onclick="deleteTransitRoute(${t.id})">🗑️</button>
+              <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick="openEditTransitModalById(${Number(t.id)})">✏️</button>
+              <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="삭제" onclick="deleteTransitRoute(${Number(t.id)})">🗑️</button>
             </div>
           </div>
           <div>
-            <div class="fav-card-title">${t.title || (mainOrigin + ' ⇄ ' + mainDest)}</div>
-            <div class="fav-card-sub" style="font-weight: 700; color: #1e293b;">${mainOrigin} ➔ ${mainDest}</div>
-            ${ret ? `<div style="font-size: 10.5px; color: #64748b; margin-top: 2px;">반대편(${subOrigin}): <strong style="color: #0284c7;">${subTime}</strong></div>` : ''}
+            <div class="fav-card-title">${escapeHtml(t.title || (mainOrigin + ' ⇄ ' + mainDest))}</div>
+            <div class="fav-card-sub" style="font-weight: 700; color: #1e293b;">${escapeHtml(mainOrigin)} ➔ ${escapeHtml(mainDest)}</div>
+            ${ret ? `<div style="font-size: 10.5px; color: #64748b; margin-top: 2px;">반대편(${escapeHtml(subOrigin)}): <strong style="color: #0284c7;">${escapeHtml(subTime)}</strong></div>` : ''}
           </div>
-          <div class="fav-card-highlight" style="color: ${mainColor};">
-            ${mainTime}
+          <div class="fav-card-highlight" style="color: ${escapeHtml(mainColor)};">
+            ${escapeHtml(mainTime)}
           </div>
         </div>
       `);
@@ -981,21 +1049,21 @@ async function loadFavorites() {
     (restaurants || []).forEach(r => {
       seenRestNames.add(r.name);
       restaurantItems.push(`
-        <div class="fav-card" onclick="focusFavoriteRestaurantById(${r.id})">
+        <div class="fav-card" onclick="focusFavoriteRestaurantById(${Number(r.id)})">
           <div class="fav-card-top" style="display: flex; justify-content: space-between; align-items: center;">
-            <span class="fav-card-tag" style="background: #ffedd5; color: #c2410c;">🍽️ ${r.category}</span>
+            <span class="fav-card-tag" style="background: #ffedd5; color: #c2410c;">🍽️ ${escapeHtml(r.category)}</span>
             <div style="display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation()">
-              <span style="font-size: 10px; color: #64748b; margin-right: 2px;">${r.distance_meters}m</span>
-              <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick="openEditRestaurantModalById(${r.id})">✏️</button>
-              <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="삭제" onclick="deleteFavoriteRestaurant(${r.id})">🗑️</button>
+              <span style="font-size: 10px; color: #64748b; margin-right: 2px;">${escapeHtml(r.distance_meters)}m</span>
+              <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick="openEditRestaurantModalById(${Number(r.id)})">✏️</button>
+              <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="삭제" onclick="deleteFavoriteRestaurant(${Number(r.id)})">🗑️</button>
             </div>
           </div>
           <div>
-            <div class="fav-card-title">${r.name}</div>
-            <div class="fav-card-sub">${r.family_note || r.address}</div>
+            <div class="fav-card-title">${escapeHtml(r.name)}</div>
+            <div class="fav-card-sub">${escapeHtml(r.family_note || r.address)}</div>
           </div>
           <div class="fav-card-highlight" style="font-size: 11px; color: #16a34a;">
-            ${r.status_badge}
+            ${escapeHtml(r.status_badge)}
           </div>
         </div>
       `);
@@ -1004,22 +1072,22 @@ async function loadFavorites() {
     // 3) 지도에서 추가한 장소들 분류 (교통, 식당, 병원/약국, 기타)
     (places || []).forEach(p => {
       const cardHtml = `
-        <div class="fav-card" onclick="focusFavoritePlaceById(${p.id})">
+        <div class="fav-card" onclick="focusFavoritePlaceById(${Number(p.id)})">
           <div class="fav-card-top" style="display: flex; justify-content: space-between; align-items: center;">
             <span class="fav-card-tag" style="background: ${isTransitCategory(p.category) ? '#e0f2fe' : (isHospitalCategory(p.category) ? '#ecfdf5' : (isRestaurantCategory(p.category) ? '#ffedd5' : '#f1f5f9'))}; color: ${isTransitCategory(p.category) ? '#0369a1' : (isHospitalCategory(p.category) ? '#047857' : (isRestaurantCategory(p.category) ? '#c2410c' : '#334155'))};">
-              ${isTransitCategory(p.category) ? '🚏' : (isHospitalCategory(p.category) ? '💊' : (isRestaurantCategory(p.category) ? '🍽️' : '⭐'))} ${p.category}
+              ${isTransitCategory(p.category) ? '🚏' : (isHospitalCategory(p.category) ? '💊' : (isRestaurantCategory(p.category) ? '🍽️' : '⭐'))} ${escapeHtml(p.category)}
             </span>
             <div style="display: flex; align-items: center; gap: 4px;" onclick="event.stopPropagation()">
-              <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick="openEditPlaceModalById(${p.id})">✏️</button>
-              <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="삭제" onclick="deleteFavoritePlace(${p.id})">🗑️</button>
+              <button style="border:none; background:#f1f5f9; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="수정" onclick="openEditPlaceModalById(${Number(p.id)})">✏️</button>
+              <button style="border:none; background:#fee2e2; color:#b91c1c; border-radius:4px; padding:2px 5px; font-size:10px; cursor:pointer;" title="삭제" onclick="deleteFavoritePlace(${Number(p.id)})">🗑️</button>
             </div>
           </div>
           <div>
-            <div class="fav-card-title">${p.name}</div>
-            <div class="fav-card-sub">${p.memo || p.address || ''}</div>
+            <div class="fav-card-title">${escapeHtml(p.name)}</div>
+            <div class="fav-card-sub">${escapeHtml(p.memo || p.address || '')}</div>
           </div>
           <div class="fav-card-highlight" style="font-size: 11px; color: #0284c7;">
-            ${p.status_info || '즐겨찾기 저장됨'}
+            ${escapeHtml(p.status_info || '즐겨찾기 저장됨')}
           </div>
         </div>
       `;
@@ -1517,7 +1585,7 @@ function initLeafletCategoryMap(container) {
     try { AppState.leafletCategoryMap.remove(); } catch (e) {}
     AppState.leafletCategoryMap = null;
   }
-  container.innerHTML = "";
+  container.replaceChildren();
 
   const map = L.map(container).setView([AppState.location.lat, AppState.location.lon], 15);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -2933,7 +3001,7 @@ async function selectBusStopFromList(stationName) {
       `;
     }
   } catch (err) {
-    container.innerHTML = "";
+    container.replaceChildren();
   }
 }
 
@@ -3275,6 +3343,7 @@ async function quickAddFavoritePlace(category, name, address, phone, status_info
 }
 
 async function toggleFavoritePlace(category, name, address = "", phone = "", status_info = "", lat = null, lon = null) {
+  if (!requireFamilyLogin("즐겨찾기 저장")) return;
   try {
     const user = AppState.currentUser ? AppState.currentUser.username : "가족공용";
     const res = await fetch("/api/places/favorite", {
@@ -3339,6 +3408,7 @@ async function checkChildSafetySummary() {
 }
 
 async function openSafetyModal() {
+  if (!requireFamilyLogin("우리 아이 안심 위치")) return;
   const modal = document.getElementById("modalSafetyMap");
   modal.className = "modal-overlay active";
 
@@ -3518,7 +3588,7 @@ function initLeafletSafetyMap(container, children) {
     try { AppState.leafletSafetyMap.remove(); } catch (e) {}
     AppState.leafletSafetyMap = null;
   }
-  container.innerHTML = "";
+  container.replaceChildren();
 
   const map = L.map(container).setView([AppState.location.lat, AppState.location.lon], 15);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -3874,6 +3944,7 @@ window.switchKeepAliveTab = switchKeepAliveTab;
 // 6. 가족 전용 실시간 채팅방
 // ==========================================
 function openChatDrawer() {
+  if (!requireFamilyLogin("가족 채팅방")) return;
   document.getElementById("chatDrawerBackdrop").className = "chat-drawer-backdrop active";
   loadChatMessages(AppState.currentChatRoom);
 
@@ -3966,13 +4037,16 @@ function triggerMessageNotification(msg) {
 }
 
 async function loadChatMessages(roomId) {
+  if (!AppState.token) return;
   try {
-    const res = await fetch(`/api/chat/messages?room_id=${roomId}`);
+    const res = await fetch(`/api/chat/messages?room_id=${encodeURIComponent(roomId)}`);
+    if (!res.ok) return;
     const msgs = await res.json();
+    if (!Array.isArray(msgs)) return;
     const scrollEl = document.getElementById("chatMessagesScroll");
-    AppState.cachedChatMessages = msgs || [];
+    AppState.cachedChatMessages = msgs;
 
-    const currentUname = AppState.currentUser ? AppState.currentUser.username : "미니미니";
+    const currentUname = AppState.currentUser ? AppState.currentUser.username : "";
 
     // 최신 메시지 감지 및 알림 트리거
     if (msgs.length > 0) {
@@ -3987,21 +4061,22 @@ async function loadChatMessages(roomId) {
 
     scrollEl.innerHTML = msgs.map(m => {
       const isMine = (m.sender_username === currentUname);
+      const loc = (m.msg_type === 'LOCATION' && m.location_data && typeof m.location_data === 'object') ? m.location_data : null;
       return `
         <div class="chat-bubble-row ${isMine ? 'mine' : ''}">
-          <span class="chat-bubble-avatar">${m.sender_avatar}</span>
+          <span class="chat-bubble-avatar">${escapeHtml(m.sender_avatar)}</span>
           <div class="chat-bubble-content">
-            <span class="chat-sender-name">${m.sender_name}</span>
+            <span class="chat-sender-name">${escapeHtml(m.sender_name)}</span>
             <div class="chat-bubble">
-              ${m.text}
-              ${m.msg_type === 'LOCATION' && m.location_data ? `
-                <div class="chat-location-card" onclick="openChatMessageLocationMapById(${m.id}); event.stopPropagation();" title="터치하여 지도에서 위치 확인">
+              ${escapeHtml(m.text)}
+              ${loc ? `
+                <div class="chat-location-card" onclick="openChatMessageLocationMapById(${Number(m.id)}); event.stopPropagation();" title="터치하여 지도에서 위치 확인">
                   <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
-                    <span style="font-weight: 800; color: #0284c7; font-size: 12.5px;">📍 ${m.location_data.landmark || '실시간 위치 공유'}</span>
-                    <span style="font-size: 10.5px; color: #64748b;">${m.time_str}</span>
+                    <span style="font-weight: 800; color: #0284c7; font-size: 12.5px;">📍 ${escapeHtml(loc.landmark || '실시간 위치 공유')}</span>
+                    <span style="font-size: 10.5px; color: #64748b;">${escapeHtml(m.time_str)}</span>
                   </div>
                   <div style="font-size: 11px; color: #475569; margin: 3px 0 6px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                    ${m.location_data.address || '남양주시 평내동 안심 위치'}
+                    ${escapeHtml(loc.address || '남양주시 평내동 안심 위치')}
                   </div>
                   <div class="chat-location-pin-btn">
                     <span>🗺️ 핀 눌러서 지도 보기</span>
@@ -4010,7 +4085,7 @@ async function loadChatMessages(roomId) {
                 </div>
               ` : ''}
             </div>
-            <span class="chat-time">${m.time_str}</span>
+            <span class="chat-time">${escapeHtml(m.time_str)}</span>
           </div>
         </div>
       `;
@@ -4023,23 +4098,26 @@ async function loadChatMessages(roomId) {
 }
 
 async function sendChatMessage() {
+  if (!requireFamilyLogin("채팅 전송")) return;
   const input = document.getElementById("chatInputText");
   const text = (input.value || "").trim();
   if (!text) return;
 
   try {
-    await fetch("/api/chat/send", {
+    const res = await fetch("/api/chat/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         room_id: AppState.currentChatRoom,
-        sender_username: AppState.currentUser ? AppState.currentUser.username : "미니미니",
+        sender_username: AppState.currentUser.username,
         text: text,
         msg_type: "TEXT"
       })
     });
-    input.value = "";
-    loadChatMessages(AppState.currentChatRoom);
+    if (res.ok) {
+      input.value = "";
+      loadChatMessages(AppState.currentChatRoom);
+    }
   } catch (e) {}
 }
 
@@ -4051,12 +4129,13 @@ function handleChatKeyDown(e) {
 
 // 채팅창에 내 현재 GPS 위치 말풍선 전송
 async function sendLocationInChat() {
+  if (!requireFamilyLogin("위치 전송")) return;
   if (!navigator.geolocation) {
     alert("위치 정보를 지원하지 않는 브라우저입니다.");
     return;
   }
 
-  const senderRole = (AppState.currentUser && AppState.currentUser.role_title) || (AppState.currentUser && AppState.currentUser.name) || "가족";
+  const senderRole = AppState.currentUser.role_title || AppState.currentUser.name || "가족";
 
   navigator.geolocation.getCurrentPosition(async (pos) => {
     const lat = pos.coords.latitude;
@@ -4068,7 +4147,7 @@ async function sendLocationInChat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           room_id: AppState.currentChatRoom,
-          sender_username: AppState.currentUser ? AppState.currentUser.username : "미니미니",
+          sender_username: AppState.currentUser.username,
           text: `📍 ${senderRole} 님이 현재 위치를 공유했습니다!`,
           msg_type: "LOCATION",
           location_data: {
@@ -4090,7 +4169,7 @@ async function sendLocationInChat() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         room_id: AppState.currentChatRoom,
-        sender_username: AppState.currentUser ? AppState.currentUser.username : "미니미니",
+        sender_username: AppState.currentUser.username,
         text: `📍 ${senderRole} 님이 현재 위치를 공유했습니다!`,
         msg_type: "LOCATION",
         location_data: {
@@ -4173,8 +4252,9 @@ async function openChatMessageLocationMap(lat, lon, landmark, address, senderNam
   if (!container) return;
 
   const kakaoReady = await loadKakaoSdk();
+  const safeSender = escapeHtml(senderName);
   if (kakaoReady && typeof kakao !== "undefined" && kakao.maps && kakao.maps.Map) {
-    container.innerHTML = "";
+    container.replaceChildren();
     chatMessageKakaoMapInstance = new kakao.maps.Map(container, {
       center: new kakao.maps.LatLng(lat, lon),
       level: 3
@@ -4188,7 +4268,7 @@ async function openChatMessageLocationMap(lat, lon, landmark, address, senderNam
 
     const targetOverlay = new kakao.maps.CustomOverlay({
       position: targetPos,
-      content: `<div style="background:#0284c7; color:#ffffff; padding:4px 10px; border-radius:10px; font-size:12px; font-weight:800; white-space:nowrap; box-shadow:0 3px 8px rgba(0,0,0,0.3); border:1.5px solid #ffffff;">📍 ${senderName} 위치</div>`,
+      content: `<div style="background:#0284c7; color:#ffffff; padding:4px 10px; border-radius:10px; font-size:12px; font-weight:800; white-space:nowrap; box-shadow:0 3px 8px rgba(0,0,0,0.3); border:1.5px solid #ffffff;">📍 ${safeSender} 위치</div>`,
       yAnchor: 2.2
     });
     targetOverlay.setMap(chatMessageKakaoMapInstance);
@@ -4218,7 +4298,7 @@ async function openChatMessageLocationMap(lat, lon, landmark, address, senderNam
       try { chatMessageLeafletMapInstance.remove(); } catch (e) {}
       chatMessageLeafletMapInstance = null;
     }
-    container.innerHTML = "";
+    container.replaceChildren();
     chatMessageLeafletMapInstance = L.map(container).setView([lat, lon], 15);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -4227,7 +4307,7 @@ async function openChatMessageLocationMap(lat, lon, landmark, address, senderNam
 
     const targetIcon = L.divIcon({
       className: 'cat-marker-pin',
-      html: `<div style="background:#0284c7;color:white;padding:3px 8px;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);border:1px solid #ffffff;">📍 ${senderName} 위치</div>`,
+      html: `<div style="background:#0284c7;color:white;padding:3px 8px;border-radius:8px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);border:1px solid #ffffff;">📍 ${safeSender} 위치</div>`,
       iconSize: [110, 24],
       iconAnchor: [55, 12]
     });
@@ -4363,8 +4443,13 @@ async function submitFamilyLogin() {
   }
 }
 
-function logoutFamily() {
+async function logoutFamily() {
   if (!confirm("현재 계정에서 로그아웃하시겠습니까?")) return;
+  try {
+    if (AppState.token) {
+      await fetch("/api/auth/logout", { method: "POST" });
+    }
+  } catch (e) {}
   localStorage.removeItem("fc_token");
   localStorage.removeItem("fc_user");
   localStorage.removeItem("fc_text_size");
@@ -4415,6 +4500,7 @@ function selectStartStation(stationName) {
 }
 
 async function saveTransitRoute() {
+  if (!requireFamilyLogin("교통 즐겨찾기 등록")) return;
   const title = document.getElementById("inputRouteTitle").value.trim();
   const station = document.getElementById("inputStationName").value.trim();
   const routeNo = document.getElementById("inputRouteNo").value.trim();
@@ -4426,7 +4512,7 @@ async function saveTransitRoute() {
   }
 
   try {
-    await fetch("/api/transit/add", {
+    const res = await fetch("/api/transit/add", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -4435,9 +4521,10 @@ async function saveTransitRoute() {
         station_name: station,
         route_no: routeNo,
         target_destination: dest,
-        user_username: AppState.currentUser ? AppState.currentUser.username : "미니미니"
+        user_username: AppState.currentUser.username
       })
     });
+    if (!res.ok) throw new Error("Save failed");
     closeRouteModal();
     alert("🚌 새 교통 루트가 즐겨찾기에 등록되었습니다!");
     loadFavorites();
@@ -4446,6 +4533,7 @@ async function saveTransitRoute() {
 
 // 번거로운 입력창 없이 출발지 ➔ 도착지 선택 시 즉시 즐겨찾기 원클릭 저장
 async function saveTransitRouteDirect(originName, destName, routeNo = "전체노선") {
+  if (!requireFamilyLogin("교통 즐겨찾기 저장")) return;
   if (!originName || !destName) return;
 
   const title = `${originName} ➔ ${destName}`;
@@ -4460,9 +4548,10 @@ async function saveTransitRouteDirect(originName, destName, routeNo = "전체노
         dest_station_name: destName,
         route_no: routeNo,
         target_destination: destName,
-        user_username: AppState.currentUser ? AppState.currentUser.username : "미니미니"
+        user_username: AppState.currentUser.username
       })
     });
+    if (!res.ok) throw new Error("Save failed");
 
     playBusAlertChime();
     showToast(`⭐ '${title}' 구간이 즐겨찾기에 즉시 저장되었습니다!`, "info");

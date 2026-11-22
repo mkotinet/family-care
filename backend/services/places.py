@@ -12,11 +12,12 @@ async def add_favorite_place(user_username: str, category: str, name: str, addre
     cursor = conn.cursor()
     now_kst = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
 
-    # 이미 즐겨찾기 되어있는지 확인
+    # 이미 즐겨찾기 되어있는지 확인 (본인 또는 가족공용 항목만 토글, 타 가족원 개인 항목 보호)
     cursor.execute("""
     SELECT id FROM favorite_places
     WHERE name = ?
-    """, (name,))
+      AND (user_username = ? OR user_username = '가족공용' OR user_username IS NULL OR user_username = '')
+    """, (name, user_username))
     row = cursor.fetchone()
 
     if row:

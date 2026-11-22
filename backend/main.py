@@ -46,8 +46,26 @@ if STATIC_DIR.exists():
 async def serve_index():
     index_file = STATIC_DIR / "index.html"
     if index_file.exists():
-        with open(index_file, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
+        html_content = index_file.read_text(encoding="utf-8")
+        # version.json의 최신 버전을 <meta name="app-version">에 동적 동기화 (60초 무한 리로드 원천 차단)
+        v_file = BASE_DIR / "version.json"
+        if v_file.exists():
+            try:
+                v_ver = json.loads(v_file.read_text(encoding="utf-8")).get("version")
+                if v_ver:
+                    import re
+                    html_content = re.sub(
+                        r'(<meta\s+name="app-version"\s+content=")[^"]*(")',
+                        rf'\g<1>{v_ver}\g<2>',
+                        html_content,
+                        count=1
+                    )
+            except Exception:
+                pass
+        return HTMLResponse(
+            content=html_content,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
     return HTMLResponse("<h3>우리가족챙기기 웹앱 초기화 중입니다...</h3>")
 
 @app.api_route("/manifest.json", methods=["GET", "HEAD"])

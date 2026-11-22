@@ -1,16 +1,12 @@
-import urllib.request
-import urllib.parse
-import json
 from datetime import datetime
 import zoneinfo
-from backend.config import DATA_GO_KR_API_KEY, TIMEZONE
+from backend.config import TIMEZONE
 from backend.database import get_cached_data, set_cached_data
-from backend.mock_data import get_simulated_health_alerts
 
 KST = zoneinfo.ZoneInfo(TIMEZONE)
 
 async def get_health_alerts(lat: float, lon: float):
-    cache_key = "health_alerts_real_v2"
+    cache_key = "health_alerts_real_v3"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
@@ -18,19 +14,23 @@ async def get_health_alerts(lat: float, lon: float):
     now = datetime.now(KST)
     month = now.month
 
-    # 꽃가루 시즌 체크 (봄: 3~6월, 가을: 8~10월, 겨울: 11~2월)
-    pollen_status = "안전"
-    pollen_msg = "현재 겨울철로 꽃가루 비산 위험이 없습니다 🍃"
-    pollen_badge = "🟢 낮음"
-
+    # 꽃가루 시즌 체크 (봄: 3~6월, 여름: 7월, 가을: 8~10월, 겨울: 11~2월)
     if 3 <= month <= 6:
         pollen_status = "보통"
         pollen_msg = "봄철 참나무·소나무 꽃가루 주의 (외출 후 세안 권장) 🌲"
         pollen_badge = "🟡 보통"
+    elif month == 7:
+        pollen_status = "안전"
+        pollen_msg = "여름철 꽃가루 비산은 적으나 장마철 습도·곰팡이 알레르기 주의 🌿"
+        pollen_badge = "🟢 낮음"
     elif 8 <= month <= 10:
         pollen_status = "주의"
         pollen_msg = "가을철 환절기 잡초류 꽃가루 주의 (알레르기 비염 대비) 🌾"
         pollen_badge = "🟠 주의"
+    else:
+        pollen_status = "안전"
+        pollen_msg = "현재 겨울철로 꽃가루 비산 위험이 없습니다 🍃"
+        pollen_badge = "🟢 낮음"
 
     # 겨울철 감기/독감 호흡기 감염병 주의
     flu_status = "경고" if month in [11, 12, 1, 2] else "주의"

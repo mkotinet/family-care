@@ -14,9 +14,10 @@ services:
       - PORT=8000
       - DATA_GO_KR_API_KEY=${DATA_GO_KR_API_KEY:-}
       - KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY:-}
-      - DEFAULT_LAT=37.6434558
-      - DEFAULT_LON=127.2311716
-      - DEFAULT_ADDRESS=경기도 남양주시 평내동 평내유진마젤란
+      - KAKAO_JS_API_KEY=${KAKAO_JS_API_KEY:-}
+      - DEFAULT_LAT=37.643421
+      - DEFAULT_LON=127.236018
+      - DEFAULT_ADDRESS=경기도 남양주시 평내로 89 (평내동, 평내마젤란21아파트)
     volumes:
       - family_care_data:/app/data
     healthcheck:

@@ -133,7 +133,6 @@ async def get_family_locations():
                 
                 tok_diff = (now_dt - tok_dt).total_seconds()
                 is_child = (r.get("role_type") == "CHILD" or r.get("username") in ["도비사랑녀", "미니미니채"])
-                online_threshold = 3600 if is_child else 900  # 자녀는 1시간까지 백그라운드 상주 온라인 보장, 부모는 15분
 
                 if tok_diff < 900:  # 15분 이내
                     is_online = True
@@ -214,7 +213,7 @@ async def get_family_locations():
                 status_badge = "🟢 실시간 접속 중 (GPS 수신 대기)"
                 time_diff_desc = "방금 접속"
                 is_fresh = True
-            elif login_status == "RECENT":
+            elif login_status in ("BACKGROUND_STANDBY", "STANDBY"):
                 target_landmark = f"집 안심구역 ({login_desc})"
                 status_badge = f"🟡 최근 접속 ({login_desc}) / 안심구역"
                 time_diff_desc = login_desc
@@ -267,6 +266,12 @@ async def request_child_ping(child_username: str, requester_name: str = "아빠"
     자녀에게 위치 전송 요청 알림 메시지를 가족 채팅방으로 발송
     """
     from backend.services.chat import send_message
-    msg_text = f"📍 [위치 확인 요청] {requester_name}님이 현재 위치를 확인하고 싶어해요. 채팅방 하단의 [📍 위치전송] 버튼을 눌러 위치를 알려주세요!"
-    await send_message("family_all", "미니미니", requester_name, "🐶", msg_text)
+    sender_username = "Ljh" if "엄마" in (requester_name or "") or requester_name == "Ljh" else "미니미니"
+    msg_text = f"📍 [위치 확인 요청] {requester_name}님이 {child_username}의 현재 위치를 확인하고 싶어해요. 채팅방 하단의 [📍 위치전송] 버튼을 눌러 위치를 알려주세요!"
+    await send_message(
+        room_id="family_all",
+        sender_username=sender_username,
+        text=msg_text,
+        msg_type="TEXT"
+    )
     return {"success": True, "message": f"{child_username}에게 위치 전송 요청을 보냈습니다."}

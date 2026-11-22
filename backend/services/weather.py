@@ -86,7 +86,7 @@ async def get_weather_data(lat: float, lon: float):
         else:
             ncst_time = now.strftime("%H00")
 
-        ncst_url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst"
+        ncst_url = "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst"
         ncst_params = {
             "serviceKey": DATA_GO_KR_API_KEY,
             "pageNo": "1",
@@ -124,18 +124,19 @@ async def get_weather_data(lat: float, lon: float):
                 weather_data["umbrella_needed"] = True
                 weather_data["umbrella_msg"] = "현재 눈이 내리고 있어요! 우산을 꼭 챙기세요 ☂️"
 
-        # 2. 기상청 단기예보 (getVilageFcst) -> 1시간별/3시간별/주간 예보 파싱
-        base_date = now.strftime("%Y%m%d")
+        # 2. 기상청 단기예보 (getVilageFcst) -> 매 3시간 +10분 발표 (15분 여유 마진으로 정각~09분 경계 에러 차단)
+        fcst_ref = now - timedelta(minutes=15)
+        base_date = fcst_ref.strftime("%Y%m%d")
         base_time = "0500"
         for t in ["2300", "2000", "1700", "1400", "1100", "0800", "0500", "0200"]:
-            if now.hour >= int(t[:2]):
+            if fcst_ref.hour >= int(t[:2]):
                 base_time = t
                 break
         else:
-            base_date = (now - timedelta(days=1)).strftime("%Y%m%d")
+            base_date = (fcst_ref - timedelta(days=1)).strftime("%Y%m%d")
             base_time = "2300"
 
-        fcst_url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
+        fcst_url = "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
         fcst_params = {
             "serviceKey": DATA_GO_KR_API_KEY,
             "pageNo": "1",
@@ -238,7 +239,7 @@ async def get_weather_data(lat: float, lon: float):
                 })
 
         # 3. 에어코리아 대기오염정보
-        air_url = "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty"
+        air_url = "https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty"
         air_params = {
             "serviceKey": DATA_GO_KR_API_KEY,
             "returnType": "json",

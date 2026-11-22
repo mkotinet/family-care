@@ -325,6 +325,7 @@ async def get_transit_routes(username: str = None):
         return_st_name = dest_text
         return_dest_name = st_name
 
+        return_arrivals_data = {}
         try:
             return_arrivals_data = await get_station_arrivals(return_st_name, None, return_dir)
             return_all_buses = return_arrivals_data.get("arrivals", [])

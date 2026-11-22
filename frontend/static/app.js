@@ -537,10 +537,10 @@ async function checkWhatsNewPopup() {
       const res = await fetch('/api/version?_t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         AppState.versionMeta = await res.json();
-        if (AppState.versionMeta && AppState.versionMeta.version) {
-          currentVer = AppState.versionMeta.version;
-        }
       }
+    }
+    if (AppState.versionMeta && AppState.versionMeta.version) {
+      currentVer = AppState.versionMeta.version;
     }
   } catch (e) {}
 

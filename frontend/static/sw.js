@@ -3,7 +3,7 @@
  * Handles App Lifecycle, Background Sync, Offline Fallback & A2HS Installability
  */
 
-const CACHE_NAME = 'family-care-pwa-v1.5.0';
+const CACHE_NAME = 'family-care-pwa-v1.5.1';
 
 // 1. Service Worker Installation
 self.addEventListener('install', (event) => {
@@ -30,7 +30,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   // Bypass cache completely for API endpoints, location updates, and version checks
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/data/')) {
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/data/') || url.pathname === '/version.json' || url.pathname === '/manifest.json') {
     event.respondWith(fetch(event.request));
     return;
   }

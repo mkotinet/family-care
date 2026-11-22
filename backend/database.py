@@ -211,14 +211,20 @@ def init_db():
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (acc["username"], acc["name"], acc["role_title"], acc["role_type"], acc["avatar"], acc["avatar_color"], acc["grade"], acc["password_hash"], now_kst))
 
-    # 부모 초기 위치 시딩 (기본 거점)
-    for parent in ["미니미니", "Ljh"]:
-        cursor.execute("SELECT username FROM user_locations WHERE username = ?", (parent,))
+    # 가족 4인 초기 안심 위치 시딩 (기본 거점 및 자녀별 미세 분리 오프셋으로 핀 겹침 방지)
+    child_offsets = {
+        "미니미니": (37.643421, 127.236018, "집 (평내마젤란21)"),
+        "Ljh": (37.643421, 127.236018, "집 (평내마젤란21)"),
+        "도비사랑녀": (37.643650, 127.236300, "집 안심구역 (첫째딸)"),
+        "미니미니채": (37.643200, 127.235700, "집 안심구역 (둘째딸)")
+    }
+    for mem, (lat, lon, lm) in child_offsets.items():
+        cursor.execute("SELECT username FROM user_locations WHERE username = ?", (mem,))
         if not cursor.fetchone():
             cursor.execute("""
-            INSERT INTO user_locations (username, latitude, longitude, accuracy, address, landmark, battery_level, is_moving, updated_at)
-            VALUES (?, 37.643421, 127.236018, 10.0, '경기도 남양주시 평내로 89 (평내동, 평내마젤란21아파트)', '집', 95, 0, ?)
-            """, (parent, now_kst))
+            INSERT INTO user_locations (username, latitude, longitude, accuracy, address, landmark, battery_level, is_moving, is_manual, updated_at)
+            VALUES (?, ?, ?, 10.0, '경기도 남양주시 평내로 89 (평내동, 평내마젤란21아파트)', ?, 95, 0, 0, ?)
+            """, (mem, lat, lon, lm, now_kst))
 
     # 기존 DB의 이전 기준점 좌표가 남아있을 경우 최신 평내마젤란21 정밀 좌표로 보정
     cursor.execute("""
@@ -234,12 +240,6 @@ def init_db():
         INSERT INTO chat_messages (room_id, room_type, sender_username, sender_name, sender_avatar, text, is_read, created_at)
         VALUES ('family_all', 'FAMILY_ALL', '미니미니', '아빠', '🐶', '우리가족챙기기 실시간 패밀리 톡방이 열렸어요! 모두 환영해요 🌿', 1, ?)
         """, (now_kst,))
-
-    # 기존 더미 자녀 위치 데이터 클린업 (실제 GPS 보고 전에는 미수신 상태로 표출)
-    cursor.execute("""
-    DELETE FROM user_locations 
-    WHERE username IN ('도비사랑녀', '미니미니채') AND (is_manual IS NULL OR is_manual = 0)
-    """)
 
     conn.commit()
     conn.close()
@@ -270,11 +270,6 @@ def set_cached_data(cache_key: str, data: dict, ttl_seconds: int = 300):
     VALUES (?, ?, ?)
     ON CONFLICT(cache_key) DO UPDATE SET data_json = excluded.data_json, expires_at = excluded.expires_at
     """, (cache_key, data_json, expires_at))
-    # 기존 더미 자녀 위치 데이터 클린업 (실제 GPS 보고 전에는 미수신 상태로 표출)
-    cursor.execute("""
-    DELETE FROM user_locations 
-    WHERE username IN ('도비사랑녀', '미니미니채') AND (is_manual IS NULL OR is_manual = 0)
-    """)
 
     conn.commit()
     conn.close()

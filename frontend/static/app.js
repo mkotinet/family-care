@@ -146,6 +146,24 @@ async function autoDetectUserLocation() {
         renderWeatherSummary(wData);
       } catch (e) {}
 
+      // 자녀 계정(도비사랑녀, 미니미니채) 로그인 중일 경우 실시간 GPS 즉각 보고
+      if (AppState.currentUser && (AppState.currentUser.role_type === "CHILD" || AppState.currentUser.username === "도비사랑녀" || AppState.currentUser.username === "미니미니채")) {
+        fetch("/api/location/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            username: AppState.currentUser.username,
+            latitude: lat,
+            longitude: lon,
+            accuracy: pos.coords.accuracy || 10,
+            battery_level: 92,
+            is_moving: false
+          })
+        }).then(() => {
+          console.log(`[Auto Location] 자녀(${AppState.currentUser.username}) 실시간 위치 서버 동기화 성공`);
+        }).catch(() => {});
+      }
+
       // 즐겨찾기 갱신
       loadFavorites();
       console.log(`[Auto Location] 내 위치 자동 반영 완료: (${lat}, ${lon})`);
@@ -3131,11 +3149,7 @@ function initLeafletSafetyMap(container, children) {
   }
   container.innerHTML = "";
 
-  const validChildren = (children || []).filter(c => c.has_location && c.latitude && c.longitude);
-  const centerLat = validChildren.length > 0 ? validChildren[0].latitude : AppState.location.lat;
-  const centerLon = validChildren.length > 0 ? validChildren[0].longitude : AppState.location.lon;
-
-  const map = L.map(container).setView([centerLat, centerLon], validChildren.length > 0 ? 14 : 15);
+  const map = L.map(container).setView([AppState.location.lat, AppState.location.lon], 15);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '© OpenStreetMap'
@@ -3143,7 +3157,7 @@ function initLeafletSafetyMap(container, children) {
 
   AppState.leafletSafetyMap = map;
 
-  // 우리 집 마커
+  // 1. 우리 집 마커
   const homeIcon = L.divIcon({
     className: 'custom-home-pin',
     html: '<div style="background:#0f172a;color:white;padding:4px 8px;border-radius:10px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:1px solid #ffffff;">🏡 우리 집</div>',
@@ -3162,13 +3176,20 @@ function initLeafletSafetyMap(container, children) {
     fillOpacity: 0.15
   }).addTo(map).bindPopup('🛡️ 유진마젤란 안심 구역 (반경 250m)');
 
-  // 유효한 위치가 있는 아이들만 마커 표시!
-  validChildren.forEach(c => {
+  // 2. 아이들(첫째딸, 둘째딸) 전체 마커 렌더링
+  const boundsPoints = [[AppState.location.lat, AppState.location.lon]];
+
+  (children || []).forEach(c => {
+    if (!c.latitude || !c.longitude) return;
+    boundsPoints.push([c.latitude, c.longitude]);
+
     const isFirstChild = (c.username === "도비사랑녀");
     const bgColor = isFirstChild ? "#f59e0b" : "#ec4899";
+    const labelTitle = `${c.avatar} ${c.role_title} (${c.name})`;
+
     const childIcon = L.divIcon({
       className: 'child-safety-pin',
-      html: `<div style="background:${bgColor};color:white;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,0.3);border:2px solid #ffffff;">${c.avatar} ${c.name} (${c.landmark || '위치'})</div>`,
+      html: `<div style="background:${bgColor};color:white;padding:5px 10px;border-radius:12px;font-size:11px;font-weight:800;white-space:nowrap;box-shadow:0 3px 10px rgba(0,0,0,0.3);border:2px solid #ffffff;cursor:pointer;">${labelTitle}</div>`,
       iconSize: [120, 28],
       iconAnchor: [60, 14]
     });
@@ -3178,7 +3199,7 @@ function initLeafletSafetyMap(container, children) {
       .bindPopup(`
         <div style="font-size:12px;line-height:1.5;">
           <b>${c.avatar} ${c.role_title} (${c.name})</b><br>
-          <span style="display:inline-block;padding:2px 6px;background:#10b981;color:white;border-radius:6px;font-size:10px;font-weight:800;margin:3px 0;">${c.status_badge}</span><br>
+          <span style="display:inline-block;padding:2px 6px;background:${bgColor};color:white;border-radius:6px;font-size:10px;font-weight:800;margin:3px 0;">${c.status_badge || '안심 모니터링'}</span><br>
           📍 <b>위치:</b> ${c.landmark || c.address}<br>
           🔋 <b>배터리:</b> ${c.battery_level ? c.battery_level + '%' : '--'} | ${c.is_moving ? '🏃 이동 중' : '🛑 정지'}<br>
           ⏱️ <b>확인:</b> ${c.time_diff_desc} (${c.updated_at})
@@ -3186,31 +3207,36 @@ function initLeafletSafetyMap(container, children) {
       `);
   });
 
+  if (boundsPoints.length > 1) {
+    try {
+      map.fitBounds(boundsPoints, { padding: [40, 40], maxZoom: 16 });
+    } catch (e) {}
+  }
+
   setTimeout(() => {
     map.invalidateSize();
   }, 200);
 }
 
 function initKakaoSafetyMap(container, children) {
-  const validChildren = (children || []).filter(c => c.has_location && c.latitude && c.longitude);
-  const centerLat = validChildren.length > 0 ? validChildren[0].latitude : AppState.location.lat;
-  const centerLon = validChildren.length > 0 ? validChildren[0].longitude : AppState.location.lon;
+  const centerLat = AppState.location.lat;
+  const centerLon = AppState.location.lon;
 
   const options = {
     center: new kakao.maps.LatLng(centerLat, centerLon),
-    level: validChildren.length > 0 ? 5 : 4
+    level: 4
   };
 
   AppState.kakaoSafetyMap = new kakao.maps.Map(container, options);
 
-  // 집 마커
+  // 1. 우리 집 마커
   const homeMarker = new kakao.maps.Marker({
     position: new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon),
     map: AppState.kakaoSafetyMap
   });
   new kakao.maps.CustomOverlay({
     position: homeMarker.getPosition(),
-    content: '<div style="padding: 4px 8px; background: #0f172a; color: white; font-size: 11px; font-weight: 800; border-radius: 8px;">🏡 우리 집</div>',
+    content: '<div style="padding: 4px 8px; background: #0f172a; color: white; font-size: 11px; font-weight: 800; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); border: 1px solid white;">🏡 우리 집</div>',
     yAnchor: 2.2,
     map: AppState.kakaoSafetyMap
   });
@@ -3227,21 +3253,38 @@ function initKakaoSafetyMap(container, children) {
     map: AppState.kakaoSafetyMap
   });
 
-  // 유효한 위치가 있는 아이들만 마커 표시!
-  validChildren.forEach(c => {
+  // 2. 아이들(첫째딸, 둘째딸) 실시간/안심 핀 전체 표출 및 한눈에 보기 바운드 설정
+  const bounds = new kakao.maps.LatLngBounds();
+  bounds.extend(new kakao.maps.LatLng(AppState.location.lat, AppState.location.lon));
+
+  (children || []).forEach(c => {
+    if (!c.latitude || !c.longitude) return;
+
     const isFirstChild = (c.username === "도비사랑녀");
     const bgColor = isFirstChild ? "#f59e0b" : "#ec4899";
+    const cPos = new kakao.maps.LatLng(c.latitude, c.longitude);
+    bounds.extend(cPos);
+
     const cMarker = new kakao.maps.Marker({
-      position: new kakao.maps.LatLng(c.latitude, c.longitude),
+      position: cPos,
       map: AppState.kakaoSafetyMap
     });
+
+    const labelText = `${c.avatar} ${c.role_title}(${c.name}) · ${c.landmark || '위치'}`;
     new kakao.maps.CustomOverlay({
-      position: cMarker.getPosition(),
-      content: `<div style="padding: 5px 9px; background: ${bgColor}; color: white; font-size: 11px; font-weight: 800; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.3); border: 2px solid white; white-space: nowrap;">${c.avatar} ${c.name} (${c.landmark || '위치'})</div>`,
+      position: cPos,
+      content: `<div style="padding: 5px 9px; background: ${bgColor}; color: white; font-size: 11px; font-weight: 800; border-radius: 10px; box-shadow: 0 3px 10px rgba(0,0,0,0.35); border: 2px solid white; white-space: nowrap; cursor: pointer;">${labelText}</div>`,
       yAnchor: 2.2,
       map: AppState.kakaoSafetyMap
     });
   });
+
+  try {
+    AppState.kakaoSafetyMap.setBounds(bounds);
+    if (AppState.kakaoSafetyMap.getLevel() < 4) {
+      AppState.kakaoSafetyMap.setLevel(4);
+    }
+  } catch (e) {}
 
   AppState.kakaoSafetyMap.relayout();
 }

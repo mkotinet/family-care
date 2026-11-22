@@ -321,9 +321,7 @@ async def get_transit_routes(username: str = None):
             "all_buses": all_buses
         })
 
-    if not results:
-        results = simulated
-
+    # 실제 사용자가 등록한 즐겨찾기 목록만 반환 (더미/가상 데이터 임의 강제 삽입 금지)
     set_cached_data(cache_key, results, ttl_seconds=15)
     return results
 

@@ -140,7 +140,7 @@ async function autoDetectUserLocation() {
 
       // 실시간 날씨 데이터 즉시 재조회 및 화면 갱신
       try {
-        const res = await fetch(`/api/weather?lat=${lat}&lon=${lon}`);
+        const res = await fetch(`/api/weather?lat=${lat}&lon=${lon}&_t=${Date.now()}`);
         const wData = await res.json();
         AppState.weatherData = wData;
         renderWeatherSummary(wData);
@@ -676,7 +676,7 @@ function updateMapEngineBadge(badgeId) {
 // ==========================================
 async function loadWeather() {
   try {
-    const res = await fetch(`/api/weather?lat=${AppState.location.lat}&lon=${AppState.location.lon}`);
+    const res = await fetch(`/api/weather?lat=${AppState.location.lat}&lon=${AppState.location.lon}&_t=${Date.now()}`);
     const data = await res.json();
     AppState.weatherData = data;
 

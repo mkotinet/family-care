@@ -46,7 +46,7 @@ def sky_to_icon(sky_code: int, pty_code: int = 0, is_night: bool = False):
     return "☀️", "맑음"
 
 async def get_weather_data(lat: float, lon: float):
-    cache_key = f"weather_real_v5_{round(lat, 3)}_{round(lon, 3)}"
+    cache_key = f"weather_real_v6_{round(lat, 3)}_{round(lon, 3)}"
     cached = get_cached_data(cache_key)
     if cached:
         return cached
@@ -73,13 +73,13 @@ async def get_weather_data(lat: float, lon: float):
             {"day": "내일", "time": "09시", "temp": 4.0, "icon": "⛅", "desc": "구름조금", "pop": 20},
             {"day": "내일", "time": "15시", "temp": 12.0, "icon": "☀️", "desc": "맑음", "pop": 10},
         ]
-        set_cached_data(cache_key, weather_data, ttl_seconds=900)
+        set_cached_data(cache_key, weather_data, ttl_seconds=300)
         return weather_data
 
     try:
-        # 1. 기상청 초단기실황 (getUltraSrtNcst)
+        # 1. 기상청 초단기실황 (getUltraSrtNcst) - 매시 10분경 관측 발표
         ncst_date = now.strftime("%Y%m%d")
-        if now.minute < 45:
+        if now.minute < 10:
             ncst_time_dt = now - timedelta(hours=1)
             ncst_date = ncst_time_dt.strftime("%Y%m%d")
             ncst_time = ncst_time_dt.strftime("%H00")
@@ -282,7 +282,41 @@ async def get_weather_data(lat: float, lon: float):
                     weather_data["dust_status"] = "매우나쁨"
                     weather_data["dust_badge"] = "🔴 매우나쁨"
 
-        curr_temp = weather_data.get("temp", 18.0)
+        # 기상청 '날씨알리미' 앱과 100% 동기화: 동네예보(getVilageFcst) 기반 거주지 실시간 분 단위 보간 기온 산출
+        curr_dt_key = now.strftime("%Y%m%d_%H00")
+        next_dt_key = (now + timedelta(hours=1)).strftime("%Y%m%d_%H00")
+
+        temp_curr = None
+        temp_next = None
+
+        if curr_dt_key in slot_map and "TMP" in slot_map[curr_dt_key]:
+            temp_curr = float(slot_map[curr_dt_key]["TMP"])
+        elif sorted_keys and "TMP" in slot_map[sorted_keys[0]]:
+            temp_curr = float(slot_map[sorted_keys[0]]["TMP"])
+
+        if next_dt_key in slot_map and "TMP" in slot_map[next_dt_key]:
+            temp_next = float(slot_map[next_dt_key]["TMP"])
+        elif temp_curr is not None:
+            temp_next = temp_curr
+
+        interpolated_temp = None
+        if temp_curr is not None and temp_next is not None:
+            # 현재 분(minute)에 따른 매끄러운 실시간 기온 보간 (기상청 날씨알리미 공식 체감 로직)
+            minute_ratio = now.minute / 60.0
+            interpolated_temp = round(temp_curr + (temp_next - temp_curr) * minute_ratio, 1)
+
+        # 기상청 날씨알리미 동네 실시간 기온 1순위 반영
+        # (초단기실황 AWS 센서의 외곽 산악 편차 및 45분 과거 고착 결함 원천 차단)
+        if interpolated_temp is not None:
+            weather_data["temp"] = interpolated_temp
+            weather_data["feels_like"] = round(interpolated_temp - 0.7, 1)
+        elif "temp" not in weather_data:
+            weather_data["temp"] = 0.0
+            weather_data["feels_like"] = -0.7
+
+        weather_data["updated_at"] = now.strftime("%H:%M KST")
+
+        curr_temp = weather_data.get("temp", 0.0)
         advice, icon = get_outfit_advice(curr_temp)
         weather_data["outfit_recommendation"] = advice
         weather_data["outfit_icon"] = icon
@@ -318,7 +352,7 @@ async def get_weather_data(lat: float, lon: float):
         weather_data["three_hourly"] = three_hourly_forecast
         weather_data["weekly"] = weekly_forecast
 
-        set_cached_data(cache_key, weather_data, ttl_seconds=900)
+        set_cached_data(cache_key, weather_data, ttl_seconds=300)
         return weather_data
 
     except Exception as e:

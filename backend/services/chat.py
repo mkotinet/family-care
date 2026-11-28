@@ -118,7 +118,7 @@ async def get_messages(room_id: str, limit: int = 50):
         })
     return results
 
-async def send_message(room_id: str, sender_username: str, text: str, msg_type: str = "TEXT", location_data: dict = None, photo_url: str = None):
+async def send_message(room_id: str, sender_username: str, text: str, msg_type: str = "TEXT", location_data: dict = None, photo_url: str = None, skip_push: bool = False):
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -146,6 +146,30 @@ async def send_message(room_id: str, sender_username: str, text: str, msg_type: 
     msg_id = cursor.lastrowid
     conn.commit()
     conn.close()
+
+    # 채팅 수신 가족 구성원에게 실시간 Web Push 발송 (비동기)
+    if not skip_push:
+        try:
+            from backend.services.push import send_web_push_to_users
+            room_targets = {
+                "family_all": ["미니미니", "Ljh", "도비사랑녀", "미니미니채"],
+                "group_pickup": ["미니미니", "Ljh", "도비사랑녀", "미니미니채"],
+                "direct_parents": ["미니미니", "Ljh"],
+                "direct_child1": ["미니미니", "Ljh", "도비사랑녀"],
+                "direct_child2": ["미니미니", "Ljh", "미니미니채"],
+            }
+            recipients = [m for m in room_targets.get(room_id, ["미니미니", "Ljh", "도비사랑녀", "미니미니채"]) if m != sender_username]
+            if recipients:
+                push_body = f"📍 위치를 공유했습니다: {(location_data or {}).get('landmark', '')}" if msg_type == "LOCATION" else (text or "")[:120]
+                await send_web_push_to_users(
+                    recipients,
+                    title=f"💬 {sender_name}",
+                    body=push_body,
+                    url=f"/?pwa=1&open_chat={room_id}",
+                    tag=f"chat-{room_id}",
+                )
+        except Exception:
+            pass
 
     return {
         "success": True,

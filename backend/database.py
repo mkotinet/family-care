@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import os
+import secrets
 from datetime import datetime, timedelta
 import zoneinfo
 from pathlib import Path
@@ -113,13 +114,62 @@ def init_db():
         battery_level INTEGER,
         is_moving INTEGER DEFAULT 0,
         is_manual INTEGER DEFAULT 0,
+        source TEXT DEFAULT 'WEB_GPS',
+        gps_permission TEXT DEFAULT 'UNKNOWN',
         updated_at TEXT NOT NULL
     )
     """)
-    try:
-        cursor.execute("ALTER TABLE user_locations ADD COLUMN is_manual INTEGER DEFAULT 0")
-    except Exception:
-        pass
+    for col_def in [
+        "is_manual INTEGER DEFAULT 0",
+        "source TEXT DEFAULT 'WEB_GPS'",
+        "gps_permission TEXT DEFAULT 'UNKNOWN'",
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE user_locations ADD COLUMN {col_def}")
+        except Exception:
+            pass
+
+    # 3-1. 자녀/가족 이동 동선 이력 테이블 (연락 두절 시 최근 이동 경로 확인용, 계정당 최신 300건 자동 유지)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS location_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        latitude REAL NOT NULL,
+        longitude REAL NOT NULL,
+        accuracy REAL,
+        address TEXT,
+        landmark TEXT,
+        battery_level INTEGER,
+        source TEXT DEFAULT 'WEB_GPS',
+        created_at TEXT NOT NULL
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_loc_hist_user_time ON location_history(username, id DESC)")
+
+    # 3-2. 아이폰 단축어(Shortcuts) 무인 백그라운드 자동 위치 전송용 전용 키 테이블
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS shortcut_keys (
+        username TEXT PRIMARY KEY,
+        api_key TEXT UNIQUE NOT NULL,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT
+    )
+    """)
+
+    # 3-3. Web Push (iOS 16.4+ PWA APNs & Android Chrome FCM) 구독 테이블
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        endpoint TEXT UNIQUE NOT NULL,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        user_agent TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(username)")
 
     # 4. 가족 전용 실시간 채팅 메시지 테이블 (단체/1:1/다:1)
     cursor.execute("""
@@ -225,7 +275,7 @@ def init_db():
     )
     """)
 
-    # 4대 공식 가족 회원 시딩/업데이트
+    # 4대 공식 가족 회원 시딩/업데이트 + 아이폰 단축어 무인 웹훅 전용 키 자동 시딩
     now_kst = datetime.now(KST).isoformat()
     for acc in FAMILY_ACCOUNTS:
         cursor.execute("SELECT id FROM users WHERE username = ?", (acc["username"],))
@@ -235,6 +285,13 @@ def init_db():
             INSERT INTO users (username, name, role_title, role_type, avatar, avatar_color, grade, password_hash, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (acc["username"], acc["name"], acc["role_title"], acc["role_type"], acc["avatar"], acc["avatar_color"], acc["grade"], acc["password_hash"], now_kst))
+
+        cursor.execute("SELECT username FROM shortcut_keys WHERE username = ?", (acc["username"],))
+        if not cursor.fetchone():
+            cursor.execute("""
+            INSERT INTO shortcut_keys (username, api_key, created_at)
+            VALUES (?, ?, ?)
+            """, (acc["username"], secrets.token_urlsafe(24), now_kst))
 
     # 가족 4인 초기 안심 위치 시딩 (기본 거점 및 자녀별 미세 분리 오프셋으로 핀 겹침 방지)
     child_offsets = {

@@ -18,7 +18,24 @@ from backend.services.auth import (
     revoke_token,
     ADMIN_USERNAMES,
 )
-from backend.services.location import update_user_location, get_family_locations, request_child_ping, reverse_geocode
+from backend.services.location import (
+    update_user_location,
+    update_gps_permission_status,
+    get_family_locations,
+    get_location_history,
+    get_shortcut_configs,
+    rotate_shortcut_key,
+    verify_shortcut_key,
+    request_child_ping,
+    reverse_geocode,
+)
+from backend.services.push import (
+    get_vapid_public_key,
+    save_push_subscription,
+    remove_push_subscription,
+    get_push_subscription_count,
+    WEBPUSH_AVAILABLE,
+)
 from backend.services.chat import get_chat_rooms, get_messages, send_message
 from backend.services.places import add_favorite_place, get_favorite_places, remove_favorite_place, update_favorite_place
 from backend.services.weather import get_weather_data
@@ -273,7 +290,7 @@ async def api_admin_audit_logs(limit: int = Query(100), admin: dict = Depends(re
     """관리자 전용 보안 감사 로그 조회 (기본지침 제7조 RBAC)"""
     return {"success": True, "admin": admin["username"], "logs": get_audit_logs(limit)}
 
-# --- 2. 실시간 GPS 안심 위치 추적 (인증 및 부모 RBAC 보호) ---
+# --- 2. 실시간 GPS 안심 위치 추적 & Web Push & iOS 단축어 무인 웹훅 ---
 @app.post("/api/location/update")
 async def api_location_update(payload: dict = Body(...), user: dict = Depends(require_auth)):
     requested_username = payload.get("username") or user["username"]
@@ -285,9 +302,122 @@ async def api_location_update(payload: dict = Body(...), user: dict = Depends(re
     accuracy = float(payload.get("accuracy", 10.0))
     battery = int(payload.get("battery_level", 100))
     is_moving = bool(payload.get("is_moving", False))
+    source = str(payload.get("source") or "WEB_GPS").upper()
+    if source not in ("WEB_GPS", "PING_REPLY"):
+        source = "WEB_GPS"
 
-    res = await update_user_location(requested_username, lat, lon, accuracy, battery, is_moving, is_manual=False)
+    res = await update_user_location(
+        requested_username, lat, lon, accuracy, battery, is_moving,
+        is_manual=False, source=source, gps_permission="GRANTED"
+    )
     return res
+
+@app.post("/api/location/status")
+async def api_location_status(payload: dict = Body(...), user: dict = Depends(require_auth)):
+    """자녀 기기 위치 권한 거부(DENIED) 또는 실내 GPS 타임아웃(TIMEOUT) 상태 보고"""
+    perm = str(payload.get("gps_permission") or "UNKNOWN").upper()
+    return await update_gps_permission_status(user["username"], perm)
+
+@app.get("/api/location/history")
+async def api_location_history(username: str = Query(...), limit: int = Query(50), user: dict = Depends(require_auth)):
+    """자녀 최근 이동 동선 타임라인 조회 (부모: 전체 자녀 조회 가능, 자녀: 본인만)"""
+    if user.get("role_type") != "PARENT" and username != user["username"]:
+        raise HTTPException(status_code=403, detail="다른 구성원의 이동 동선은 부모 계정에서만 조회할 수 있습니다.")
+    items = await get_location_history(username, limit=limit)
+    return {"username": username, "count": len(items), "items": items}
+
+@app.get("/api/location/shortcut-config")
+async def api_location_shortcut_config(user: dict = Depends(require_auth)):
+    """아이폰 '단축어(Shortcuts)' 자동화 무인 백그라운드 위치전송용 웹훅 URL & 전용 키 조회"""
+    configs = await get_shortcut_configs(user)
+    return {"success": True, "configs": configs}
+
+@app.post("/api/location/shortcut-rotate")
+async def api_location_shortcut_rotate(request: Request, payload: dict = Body(...), user: dict = Depends(require_auth)):
+    target_user = payload.get("username") or user["username"]
+    if user.get("role_type") != "PARENT" and target_user != user["username"]:
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+    res = await rotate_shortcut_key(target_user)
+    write_audit_log(user["username"], "SHORTCUT_KEY_ROTATE", "SUCCESS", f"target={target_user}", _extract_client_ip(request), request.headers.get("user-agent", ""))
+    return res
+
+@app.post("/api/location/shortcut-webhook")
+async def api_location_shortcut_webhook(
+    request: Request,
+    payload: dict = Body(default={}),
+    x_shortcut_key: str = Header(None, alias="X-Shortcut-Key"),
+    key: str = Query(None),
+):
+    """
+    아이폰 내장 [단축어(Shortcuts) > 자동화] 무인 백그라운드 GPS 수신 웹훅
+    (앱 미실행·화면 잠금 상태에서도 추적 팝업 0회로 자동 위치 보고)
+    """
+    api_key = x_shortcut_key or payload.get("key") or payload.get("api_key") or key or ""
+    username = verify_shortcut_key(api_key)
+    if not username:
+        raise HTTPException(status_code=401, detail="유효하지 않은 단축어 키입니다.")
+
+    raw_lat = payload.get("latitude") if payload.get("latitude") is not None else payload.get("lat")
+    raw_lon = payload.get("longitude") if payload.get("longitude") is not None else payload.get("lon")
+    if raw_lat is None or raw_lon is None:
+        raise HTTPException(status_code=400, detail="latitude, longitude 값이 필요합니다.")
+    try:
+        lat = float(str(raw_lat).strip())
+        lon = float(str(raw_lon).strip())
+    except Exception:
+        raise HTTPException(status_code=400, detail="좌표 형식이 올바르지 않습니다.")
+
+    raw_bat = payload.get("battery_level") if payload.get("battery_level") is not None else payload.get("battery")
+    battery = 85
+    if raw_bat is not None and str(raw_bat).strip() != "":
+        try:
+            b_val = float(str(raw_bat).replace("%", "").strip())
+            battery = int(round(b_val * 100)) if 0 < b_val <= 1.0 else int(round(max(0, min(100, b_val))))
+        except Exception:
+            battery = 85
+
+    accuracy = 15.0
+    if payload.get("accuracy") is not None:
+        try:
+            accuracy = float(payload.get("accuracy"))
+        except Exception:
+            pass
+
+    res = await update_user_location(
+        username, lat, lon, accuracy=accuracy, battery=battery,
+        is_moving=False, is_manual=False, source="IOS_SHORTCUT", gps_permission="GRANTED"
+    )
+    write_audit_log(username, "IOS_SHORTCUT_LOCATION", "SUCCESS", f"landmark={res.get('landmark')}, bat={battery}%", _extract_client_ip(request), request.headers.get("user-agent", ""))
+    return res
+
+# --- 2-1. Web Push (VAPID / iOS 16.4+ PWA APNs & Android FCM) ---
+@app.get("/api/push/vapid-public-key")
+async def api_push_vapid_public_key():
+    pub = get_vapid_public_key()
+    return {"public_key": pub, "available": bool(WEBPUSH_AVAILABLE and pub)}
+
+@app.post("/api/push/subscribe")
+async def api_push_subscribe(request: Request, payload: dict = Body(...), user: dict = Depends(require_auth)):
+    endpoint = payload.get("endpoint") or ""
+    keys = payload.get("keys") or {}
+    p256dh = keys.get("p256dh") or payload.get("p256dh") or ""
+    auth = keys.get("auth") or payload.get("auth") or ""
+    if not endpoint or not p256dh or not auth:
+        raise HTTPException(status_code=400, detail="유효한 Web Push 구독 정보가 아닙니다.")
+    ok = save_push_subscription(user["username"], endpoint, p256dh, auth, request.headers.get("user-agent", ""))
+    write_audit_log(user["username"], "PUSH_SUBSCRIBE", "SUCCESS" if ok else "FAIL", f"subs={get_push_subscription_count(user['username'])}", _extract_client_ip(request), request.headers.get("user-agent", ""))
+    return {"success": ok, "sub_count": get_push_subscription_count(user["username"])}
+
+@app.post("/api/push/unsubscribe")
+async def api_push_unsubscribe(payload: dict = Body(...), user: dict = Depends(require_auth)):
+    endpoint = payload.get("endpoint") or ""
+    ok = remove_push_subscription(endpoint)
+    return {"success": ok, "sub_count": get_push_subscription_count(user["username"])}
+
+@app.get("/api/push/status")
+async def api_push_status(user: dict = Depends(require_auth)):
+    cnt = get_push_subscription_count(user["username"])
+    return {"subscribed": cnt > 0, "sub_count": cnt, "available": WEBPUSH_AVAILABLE}
 
 @app.post("/api/location/manual-set")
 async def api_location_manual_set(request: Request, payload: dict = Body(...), parent: dict = Depends(require_parent)):

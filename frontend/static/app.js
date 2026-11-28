@@ -90,11 +90,28 @@ const AppState = {
 // ==========================================
 // 1. 초기화 및 세션 관리
 // ==========================================
+function isInAppBrowser() {
+  const ua = navigator.userAgent || "";
+  return /KAKAOTALK|Instagram|FBAN|FBAV|NAVER\(inapp|Line\//i.test(ua);
+}
+
+function isChildUser(u) {
+  if (!u) return false;
+  return u.role_type === "CHILD" || u.username === "도비사랑녀" || u.username === "미니미니채";
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   initClock();
   setupMobileLifecycle();
   initPwaServiceWorker();
   checkPwaDisplayMode();
+
+  // 카카오톡 등 인앱 브라우저 접속 시 안내 배너 표출 (권한 미저장 반복 팝업 차단)
+  const inAppEl = document.getElementById("inAppBrowserBanner");
+  if (inAppEl && isInAppBrowser()) {
+    inAppEl.style.display = "flex";
+  }
+
   await loadStoredSession();
   await initApp();
 
@@ -116,12 +133,32 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 버스 도착 알림 감시 루프 초기화 (15초 주기)
   initBusAlertSystem();
 
-  // 앱 실행 시 내 위치 자동 탐색 및 날씨/지역 자동 반영
-  autoDetectUserLocation();
+  // 푸시 알림 클릭으로 진입한 ?auto_ping=1 / ?open_chat= 원탭 자동 처리
+  const handledAction = await handleUrlActionParams();
 
-  // 자녀 계정일 경우 자동 GPS 위치 추적 리포트 가동
-  if (AppState.currentUser && AppState.currentUser.role_type === "CHILD") {
-    startChildLocationTracker();
+  // 앱 실행 시 단일 스마트 위치 엔진 가동 (중복 3중 호출 원천 차단)
+  if (!handledAction) {
+    await autoDetectUserLocation();
+  }
+
+  // 자녀 계정일 경우 스로틀·폴백 기반 백그라운드 감시 루프만 1회 등록
+  if (isChildUser(AppState.currentUser)) {
+    startChildLocationTracker({ skipImmediatePing: true });
+  }
+
+  // 푸시 구독 상태 UI 동기화
+  syncPushButtonState();
+
+  // Service Worker 알림 클릭 메시지 수신 (이미 열려 있는 앱에서도 원탭 즉시 회신)
+  if (navigator.serviceWorker) {
+    navigator.serviceWorker.addEventListener("message", (event) => {
+      const msg = event.data || {};
+      if (msg.type === "AUTO_PING_REQUEST") {
+        sendChildSafeLocationNow(true);
+      } else if (msg.type === "OPEN_CHAT_REQUEST") {
+        openChatDrawer();
+      }
+    });
   }
 });
 
@@ -241,71 +278,285 @@ async function switchToHomeLocation() {
   }
 }
 
-// 앱 실행 시 브라우저 GPS로 내 현재 위치를 자동 탐색하여 초기 위치명·날씨·생활정보를 즉시 동기화
+// 2단계 실내 폴백 GPS 획득 (1차 고정밀 위성 6초 -> 실패 시 2차 Wi-Fi/기지국 8초 자동 전환)
+function acquireBestPosition(preferHighAccuracy = true) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject({ code: 0, message: "GEOLOCATION_UNSUPPORTED" });
+      return;
+    }
+    const fallbackLow = () => {
+      navigator.geolocation.getCurrentPosition(
+        resolve,
+        reject,
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+      );
+    };
+    if (!preferHighAccuracy) {
+      fallbackLow();
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      resolve,
+      (err) => {
+        // 권한 거부(code 1)는 재시도해도 팝업만 자극하므로 즉시 종료; 실내 타임아웃(3)/수신불가(2)만 2차 Wi-Fi 폴백!
+        if (err && err.code === 1) {
+          reject(err);
+        } else {
+          fallbackLow();
+        }
+      },
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 15000 }
+    );
+  });
+}
+
+// Geolocation 권한 사전 확인 (Permissions API 지원 브라우저에서 'denied' 시 불필요한 재호출 차단)
+async function queryGeoPermissionState() {
+  try {
+    if (navigator.permissions && navigator.permissions.query) {
+      const st = await navigator.permissions.query({ name: "geolocation" });
+      return st.state; // 'granted' | 'prompt' | 'denied'
+    }
+  } catch (e) {}
+  return "unknown";
+}
+
+// 자녀 기기 위치 권한/오류 상태 서버 보고 (부모 화면에서 원인 즉시 판별)
+async function reportGpsPermissionStatus(statusStr) {
+  if (!AppState.token || !isChildUser(AppState.currentUser)) return;
+  if (AppState._lastReportedGpsPerm === statusStr) return;
+  AppState._lastReportedGpsPerm = statusStr;
+  try {
+    await fetch("/api/location/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gps_permission: statusStr })
+    });
+  } catch (e) {}
+  const stEl = document.getElementById("childQuickStatusText");
+  if (stEl) {
+    if (statusStr === "DENIED") {
+      stEl.textContent = "⚠️ 아이폰 위치 권한 꺼짐 — [🍎 추적창 끄기] 설정 필요";
+      stEl.style.color = "#dc2626";
+    } else if (statusStr === "TIMEOUT") {
+      stEl.textContent = "🟡 실내 GPS 지연 — 위 버튼으로 수동 전송 가능";
+      stEl.style.color = "#b45309";
+    }
+  }
+}
+
+// 자녀 위치 서버 전송 단일 게이트 (25초/25m 중복 전송 스로틀로 1초 7회 폭주 원천 차단)
+async function reportChildLocationToServer(pos, opts = {}) {
+  if (!AppState.token || !isChildUser(AppState.currentUser) || !pos || !pos.coords) return null;
+  const force = Boolean(opts.force);
+  const source = opts.source || "WEB_GPS";
+  const lat = pos.coords.latitude;
+  const lon = pos.coords.longitude;
+  const acc = pos.coords.accuracy || 15;
+  const now = Date.now();
+
+  if (!force && AppState._lastChildReportMeta) {
+    const dtMs = now - AppState._lastChildReportMeta.ts;
+    const moved = typeof calcHaversineMeters === "function"
+      ? calcHaversineMeters(AppState._lastChildReportMeta.lat, AppState._lastChildReportMeta.lon, lat, lon)
+      : 999;
+    if (dtMs < 25000 && moved < 25) {
+      return null; // 중복 폭주 차단
+    }
+  }
+  if (AppState._childReportInFlight && !force) return null;
+
+  AppState._childReportInFlight = true;
+  try {
+    let batteryLevel = 88;
+    try {
+      if (navigator.getBattery) {
+        const b = await navigator.getBattery();
+        batteryLevel = Math.round(b.level * 100);
+      }
+    } catch (e) {}
+
+    const res = await fetch("/api/location/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: AppState.currentUser.username,
+        latitude: lat,
+        longitude: lon,
+        accuracy: acc,
+        battery_level: batteryLevel,
+        is_moving: (pos.coords.speed || 0) > 1.0,
+        source: source
+      })
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    AppState._lastChildReportMeta = { ts: Date.now(), lat, lon };
+    AppState._lastReportedGpsPerm = "GRANTED";
+
+    const stEl = document.getElementById("childQuickStatusText");
+    if (stEl) {
+      const hhmm = new Intl.DateTimeFormat("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Seoul" }).format(new Date());
+      stEl.textContent = `🟢 ${hhmm} 부모님께 위치 전송 완료 (${data.landmark || "확인됨"})`;
+      stEl.style.color = "#15803d";
+    }
+    return data;
+  } catch (e) {
+    return null;
+  } finally {
+    AppState._childReportInFlight = false;
+  }
+}
+
+// 자녀 원클릭(또는 긴급 푸시 터치 ?auto_ping=1) 즉시 위치 전송 & 가족톡 자동 공유
+async function sendChildSafeLocationNow(shareInChat = true) {
+  if (!requireFamilyLogin("내 위치 전송")) return;
+  const btn = document.getElementById("btnChildSendLocNow");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "📡 위치 측정 중...";
+  }
+  try {
+    const pos = await acquireBestPosition(true);
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    await syncLocationAddress(lat, lon, true);
+
+    const upd = await reportChildLocationToServer(pos, { source: "PING_REPLY", force: true });
+    if (shareInChat) {
+      const lm = (upd && upd.landmark) || (AppState.location && AppState.location.address) || "현재 위치";
+      const addr = (upd && upd.address) || (AppState.location && AppState.location.address) || "";
+      await fetch("/api/chat/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          room_id: "family_all",
+          text: `📍 ${AppState.currentUser.role_title}(${AppState.currentUser.name})가 현재 위치를 보냈어요! (${lm})`,
+          msg_type: "LOCATION",
+          location_data: { latitude: lat, longitude: lon, landmark: lm, address: addr }
+        })
+      }).catch(() => {});
+    }
+    if (typeof showToast === "function") {
+      showToast("✅ 부모님께 현재 위치를 안전하게 전송했습니다!", "success");
+    }
+  } catch (err) {
+    if (err && err.code === 1) {
+      await reportGpsPermissionStatus("DENIED");
+      if (typeof showToast === "function") {
+        showToast("⚠️ 위치 권한이 꺼져 있어요! [🍎 추적창 끄기] 설정을 확인해 주세요.", "error");
+      }
+      openKeepAliveGuideModal("iphone");
+    } else {
+      await reportGpsPermissionStatus("TIMEOUT");
+      if (typeof showToast === "function") {
+        showToast("실내 GPS 신호가 약합니다. 창가에서 다시 시도해 주세요.", "error");
+      }
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "📍 지금 부모님께 위치 보내기";
+    }
+  }
+}
+window.sendChildSafeLocationNow = sendChildSafeLocationNow;
+
+// 푸시 알림 클릭 URL 파라미터(?auto_ping=1 / ?open_chat=) 자동 처리
+async function handleUrlActionParams() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const autoPing = params.get("auto_ping");
+    const openChat = params.get("open_chat");
+    if (autoPing === "1" && AppState.currentUser && AppState.token) {
+      params.delete("auto_ping");
+      params.delete("from_push");
+      const cleanQs = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (cleanQs ? "?" + cleanQs : ""));
+      await sendChildSafeLocationNow(true);
+      return true;
+    }
+    if (openChat && AppState.currentUser && AppState.token) {
+      params.delete("open_chat");
+      const cleanQs = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (cleanQs ? "?" + cleanQs : ""));
+      AppState.currentChatRoom = openChat;
+      openChatDrawer();
+    }
+  } catch (e) {}
+  return false;
+}
+
+// 앱 실행 시 브라우저 GPS로 내 현재 위치를 자동 탐색하여 초기 위치명·날씨·생활정보·자녀 위치를 1회 단일 동기화
 async function autoDetectUserLocation() {
   if (!navigator.geolocation) {
     await syncLocationAddress(AppState.location.lat, AppState.location.lon, false);
     return;
   }
 
-  navigator.geolocation.getCurrentPosition(
-    async (pos) => {
-      const lat = pos.coords.latitude;
-      const lon = pos.coords.longitude;
-      const prevLat = AppState.location.lat;
-      const prevLon = AppState.location.lon;
-      const movedMeters = typeof calcHaversineMeters === "function"
-        ? calcHaversineMeters(prevLat, prevLon, lat, lon)
-        : 999;
+  // 인앱 브라우저(카카오톡 등)에서는 권한이 저장되지 않아 매번 창이 뜨므로 자동 GPS 호출 보류
+  if (isInAppBrowser()) {
+    updateLocationBarUI();
+    return;
+  }
 
-      AppState.location.lat = lat;
-      AppState.location.lon = lon;
-      AppState.location.gpsResolved = true;
+  // 이미 권한이 영구 거부된 상태면 불필요한 반복 호출 중단하고 서버에 상태만 기록
+  const permState = await queryGeoPermissionState();
+  if (permState === "denied") {
+    await reportGpsPermissionStatus("DENIED");
+    updateLocationBarUI();
+    return;
+  }
 
-      // 서버 측 카카오 REST 역지오코딩으로 초기 화면 위치명 즉시 표시 (JS SDK 불필요)
-      await syncLocationAddress(lat, lon, true);
+  try {
+    // 2단계 실내 폴백 지원 GPS 조회 (고정밀 6초 -> 실패 시 Wi-Fi/기지국 8초)
+    const pos = await acquireBestPosition(true);
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const prevLat = AppState.location.lat;
+    const prevLon = AppState.location.lon;
+    const movedMeters = typeof calcHaversineMeters === "function"
+      ? calcHaversineMeters(prevLat, prevLon, lat, lon)
+      : 999;
 
-      // 기존 거점과 150m 이상 달라진 경우 날씨/즐겨찾기 및 열린 시트 자동 재조회
-      if (movedMeters >= 150 || !AppState.weatherData) {
-        try {
-          const res = await fetch(`/api/weather?lat=${lat}&lon=${lon}&_t=${Date.now()}`);
-          const wData = await res.json();
-          AppState.weatherData = wData;
-          renderWeatherSummary(wData);
-        } catch (e) {}
-        loadFavorites();
-        await reloadOpenCategorySheet();
-      }
+    AppState.location.lat = lat;
+    AppState.location.lon = lon;
+    AppState.location.gpsResolved = true;
 
-      // 자녀 계정(도비사랑녀, 미니미니채) 로그인 중일 경우 실시간 GPS 즉각 보고
-      if (AppState.currentUser && (AppState.currentUser.role_type === "CHILD" || AppState.currentUser.username === "도비사랑녀" || AppState.currentUser.username === "미니미니채")) {
-        fetch("/api/location/update", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username: AppState.currentUser.username,
-            latitude: lat,
-            longitude: lon,
-            accuracy: pos.coords.accuracy || 10,
-            battery_level: 92,
-            is_moving: false
-          })
-        }).then(() => {
-          console.log(`[Auto Location] 자녀(${AppState.currentUser.username}) 실시간 위치 서버 동기화 성공`);
-        }).catch(() => {});
-      }
+    // 서버 측 카카오 REST 역지오코딩으로 초기 화면 위치명 즉시 표시 (JS SDK 불필요)
+    await syncLocationAddress(lat, lon, true);
 
-      console.log(`[Auto Location] 내 위치 자동 반영 완료: (${lat}, ${lon}, ${AppState.location.address}, 이동=${movedMeters}m)`);
-    },
-    async () => {
-      console.log("[Auto Location] GPS 권한 미허용/타임아웃. 최근 위치 또는 우리 집 기준으로 표시");
-      updateLocationBarUI();
-      if (!AppState.location.address || AppState.location.address.includes("확인 중")) {
-        await syncLocationAddress(AppState.location.lat, AppState.location.lon, false);
-      }
-    },
-    { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
-  );
+    // 기존 거점과 150m 이상 달라진 경우 날씨/즐겨찾기 및 열린 시트 자동 재조회
+    if (movedMeters >= 150 || !AppState.weatherData) {
+      try {
+        const res = await fetch(`/api/weather?lat=${lat}&lon=${lon}&_t=${Date.now()}`);
+        const wData = await res.json();
+        AppState.weatherData = wData;
+        renderWeatherSummary(wData);
+      } catch (e) {}
+      loadFavorites();
+      await reloadOpenCategorySheet();
+    }
+
+    // 자녀 계정 로그인 중일 경우 단일 게이트로 서버 보고 (중복 전송 차단)
+    if (isChildUser(AppState.currentUser)) {
+      await reportChildLocationToServer(pos, { source: "WEB_GPS" });
+    }
+
+    console.log(`[Auto Location] 내 위치 단일 동기화 완료: (${lat}, ${lon}, ${AppState.location.address}, 이동=${movedMeters}m)`);
+  } catch (err) {
+    if (err && err.code === 1) {
+      await reportGpsPermissionStatus("DENIED");
+    } else if (err && (err.code === 2 || err.code === 3)) {
+      await reportGpsPermissionStatus("TIMEOUT");
+    }
+    console.log("[Auto Location] GPS 권한 미허용/타임아웃. 최근 위치 또는 우리 집 기준으로 표시");
+    updateLocationBarUI();
+    if (!AppState.location.address || AppState.location.address.includes("확인 중")) {
+      await syncLocationAddress(AppState.location.lat, AppState.location.lon, false);
+    }
+  }
 }
 
 // 시계 가동
@@ -325,15 +576,15 @@ function initClock() {
   setInterval(update, 10000);
 }
 
-// 모바일 BFCache 및 백그라운드 복귀 대응 (Rule 5)
+// 모바일 BFCache 및 백그라운드 복귀 대응 (Rule 5 - 단일 통합 리스너로 중복 GPS 폭주 방지)
 function setupMobileLifecycle() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       refreshData();
       checkAppVersionUpdate(false);
       sendUserHeartbeat();
-      if (AppState.currentUser && AppState.currentUser.role_type === "CHILD") {
-        startChildLocationTracker();
+      if (isChildUser(AppState.currentUser)) {
+        triggerThrottledChildSync();
       }
     }
   });
@@ -342,6 +593,9 @@ function setupMobileLifecycle() {
       refreshData();
       checkAppVersionUpdate(false);
       sendUserHeartbeat();
+      if (isChildUser(AppState.currentUser)) {
+        triggerThrottledChildSync();
+      }
     }
   });
   window.addEventListener("focus", () => {
@@ -351,7 +605,7 @@ function setupMobileLifecycle() {
 }
 
 // ==========================================
-// PWA & Service Worker Engine (v1.3.1)
+// PWA & Service Worker Engine (v1.9.0)
 // ==========================================
 function checkPwaDisplayMode() {
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
@@ -369,7 +623,10 @@ function checkPwaDisplayMode() {
 function showPwaInstallBanner() {
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   if (isStandalone) return;
-  if (sessionStorage.getItem("pwa_banner_dismissed") === "true") return;
+  try {
+    const dismissedAt = parseInt(localStorage.getItem("pwa_banner_dismissed_at") || "0", 10);
+    if (dismissedAt && (Date.now() - dismissedAt) < 7 * 86400000) return; // 7일간 재노출 억제
+  } catch (e) {}
 
   const banner = document.getElementById("pwaInstallBanner");
   if (banner) banner.style.display = "flex";
@@ -380,14 +637,17 @@ function showPwaInstallBanner() {
 function dismissPwaBanner() {
   const banner = document.getElementById("pwaInstallBanner");
   if (banner) banner.style.display = "none";
-  sessionStorage.setItem("pwa_banner_dismissed", "true");
+  try {
+    localStorage.setItem("pwa_banner_dismissed_at", String(Date.now()));
+  } catch (e) {}
 }
 
 function initPwaServiceWorker() {
   if (typeof window === "undefined") return;
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/sw.js?v=1.3.1", { scope: "/" })
+    const swVer = encodeURIComponent(AppState.APP_VERSION || "1.9.0");
+    navigator.serviceWorker.register(`/sw.js?v=${swVer}`, { scope: "/" })
       .then((reg) => {
         console.log("[PWA] Service Worker registered with scope:", reg.scope);
       })
@@ -481,24 +741,28 @@ function updateHeaderUserUI() {
   const nameEl = document.getElementById("headerUserName");
   const safetyBtn = document.getElementById("btnOpenSafetyMap");
   const safetyBanner = document.getElementById("childSafetyBanner");
+  const childBar = document.getElementById("childQuickSafeBar");
 
   if (u) {
     if (avatarEl) avatarEl.textContent = u.avatar || "👤";
     if (nameEl) nameEl.textContent = `${u.name} (${u.role_title})`;
 
-    // 부모 계정일 때만 아이 실시간 안심위치 버튼 및 배너 활성화
+    // 부모 계정일 때만 아이 실시간 안심위치 버튼 및 배너 활성화, 자녀는 원클릭 안전 바 활성화
     if (u.role_type === "PARENT") {
       if (safetyBtn) safetyBtn.style.display = "inline-flex";
       if (safetyBanner) safetyBanner.style.display = "flex";
+      if (childBar) childBar.style.display = "none";
     } else {
       if (safetyBtn) safetyBtn.style.display = "none";
       if (safetyBanner) safetyBanner.style.display = "none";
+      if (childBar) childBar.style.display = "flex";
     }
   } else {
     if (avatarEl) avatarEl.textContent = "🔐";
     if (nameEl) nameEl.textContent = "가족 로그인 필요";
     if (safetyBtn) safetyBtn.style.display = "none";
     if (safetyBanner) safetyBanner.style.display = "none";
+    if (childBar) childBar.style.display = "none";
   }
 
   // 사용자 역할(엄마/아빠 vs 자녀)에 맞춘 가독성 글자 크기 선제 적용
@@ -765,6 +1029,11 @@ function closeWhatsNewModal(e) {
   if (e && e.target && e.target.id !== "modalWhatsNew" && !e.target.closest(".sheet-close-btn") && !e.target.closest(".btn-primary") && !e.target.closest(".btn-secondary")) {
     return;
   }
+  // [확인했어요 ✨] 또는 [✕]로 닫아도 해당 버전을 확인 완료 처리하여 매 접속 시 팝업 반복 차단
+  const currentVer = (AppState.versionMeta && AppState.versionMeta.version) || AppState.APP_VERSION;
+  try {
+    if (currentVer) localStorage.setItem('family_dismissed_update_version', currentVer);
+  } catch (err) {}
   const modal = document.getElementById('modalWhatsNew');
   if (modal) modal.className = 'modal-overlay';
 }
@@ -3566,20 +3835,32 @@ async function checkChildSafetySummary() {
     const subEl = document.getElementById("safetyBannerSub");
 
     if (children.length > 0) {
-      const unreported = children.filter(c => !c.has_location);
-      if (unreported.length === children.length) {
-        if (titleEl) titleEl.textContent = "우리 아이 실시간 안심 위치";
-        if (subEl) subEl.textContent = "⚠️ 자녀 스마트폰 위치 수신 대기 중 (앱 설치 및 실행 필요)";
-      } else if (unreported.length > 0) {
-        const reportedChild = children.find(c => c.has_location);
-        const unChild = unreported[0];
-        if (titleEl) titleEl.textContent = `우리 아이 안심 위치 (1명 확인 / 1명 대기)`;
-        if (subEl) subEl.textContent = `${reportedChild.name}: ${reportedChild.landmark} | ⚠️ ${unChild.name}: 미수신`;
+      const liveChildren = children.filter(c => c.has_fresh_location && c.gps_permission !== "DENIED");
+      const deniedChildren = children.filter(c => c.gps_permission === "DENIED");
+
+      if (deniedChildren.length > 0) {
+        if (titleEl) titleEl.textContent = `⚠️ 우리 아이 위치 권한 점검 필요 (${deniedChildren.map(c => c.role_title).join(", ")})`;
+      } else if (liveChildren.length === children.length) {
+        if (titleEl) titleEl.textContent = `🟢 우리 아이 안심 위치 (${children.length}명 실시간 확인)`;
+      } else if (liveChildren.length > 0) {
+        if (titleEl) titleEl.textContent = `🟡 우리 아이 안심 위치 (${liveChildren.length}명 실시간 / ${children.length - liveChildren.length}명 확인 필요)`;
       } else {
-        const summaryTexts = children.map(c => `${c.role_title}(${c.name}): ${c.landmark || '위치 확인됨'}`);
-        if (titleEl) titleEl.textContent = `우리 아이 안심 위치 (${children.length}명 전원 확인)`;
-        if (subEl) subEl.textContent = summaryTexts.join(" | ");
+        if (titleEl) titleEl.textContent = `🔴 우리 아이 실시간 위치 갱신 필요 (터치하여 호출)`;
       }
+
+      const summaryTexts = children.map(c => {
+        if (c.gps_permission === "DENIED") {
+          return `${c.role_title}: ⚠️권한 꺼짐`;
+        }
+        if (c.has_fresh_location) {
+          return `${c.role_title}: 🟢${c.landmark || '확인됨'} (${c.time_diff_desc})`;
+        }
+        if (c.has_real_gps) {
+          return `${c.role_title}: 🔴${c.time_diff_desc} 마지막(${c.landmark || '미상'})`;
+        }
+        return `${c.role_title}: ⚪미수신`;
+      });
+      if (subEl) subEl.textContent = summaryTexts.join(" | ");
     }
   } catch (e) {}
 }
@@ -3624,71 +3905,99 @@ async function fetchFamilyLocations(isSilent = false) {
     const data = await res.json();
     const children = data.children || [];
 
-    // 아이들 위치 및 실시간 로그인 접속 모니터링 카드 렌더링
+    // 아이들 위치·신선도·푸시 연결·이동 동선 모니터링 카드 렌더링 (과거 위치 착시 원천 차단)
     const listEl = document.getElementById("safetyChildrenList");
+    AppState._latestSafetyChildren = children;
     listEl.innerHTML = children.map(c => {
       const isOnline = c.is_online;
-      const sessionBadgeBg = isOnline ? "#22c55e" : (c.login_status === 'RECENT' ? '#f59e0b' : '#94a3b8');
-      const cardBg = isOnline ? "#f0fdf4" : (c.is_manual ? "#fffbeb" : "#ffffff");
-      const cardBorder = isOnline ? "#86efac" : (c.is_manual ? "#fde047" : "#e2e8f0");
+      const isDenied = c.gps_permission === "DENIED";
+      const freshness = c.freshness_status || (c.is_fresh ? "LIVE" : "DISCONNECTED");
+      const isLive = freshness === "LIVE" || freshness === "RECENT";
+      const isStale = freshness === "STALE";
+
+      const sessionBadgeBg = isOnline ? "#22c55e" : (c.login_status === 'BACKGROUND_STANDBY' ? '#f59e0b' : '#94a3b8');
+      const cardBg = isDenied ? "#fef2f2" : (isLive ? "#f0fdf4" : (isStale ? "#fffbeb" : "#fff1f2"));
+      const cardBorder = isDenied ? "#fca5a5" : (isLive ? "#86efac" : (isStale ? "#fcd34d" : "#fda4af"));
 
       let locationTitle = "📍 위치 미수신";
       let locationBadge = "";
       let locationDesc = "";
 
-      if (c.has_location) {
-        locationTitle = `📍 ${c.landmark || c.address}`;
+      if (isDenied) {
+        locationTitle = `⚠️ 아이폰 위치 권한이 꺼져 있습니다`;
+        locationBadge = '<span style="font-size: 9.5px; padding: 2px 6px; background: #fee2e2; color: #b91c1c; border-radius: 4px; font-weight: 800;">권한 꺼짐</span>';
+        locationDesc = `마지막 기록(${escapeHtml(c.time_diff_desc)}): ${escapeHtml(c.landmark || c.address)} · 자녀 아이폰 Safari 주소창 [웹사이트 설정 ➔ 위치 ➔ 허용] 설정이 필요합니다.`;
+      } else if (c.has_real_gps) {
+        locationTitle = `📍 ${escapeHtml(c.landmark || c.address)}`;
         if (c.is_manual) {
-          locationBadge = '<span style="font-size: 9px; padding: 2px 6px; background: #fef08a; color: #854d0e; border-radius: 4px; font-weight: 800;">부모 수동지정</span>';
-          locationDesc = `📌 부모가 수동 설정한 장소('${c.landmark}') 표시 중 (${c.time_diff_desc} 지정). 자녀가 스마트폰에서 로그인 시 실시간 GPS로 자동 갱신됩니다.`;
+          locationBadge = '<span style="font-size: 9.5px; padding: 2px 6px; background: #fef08a; color: #854d0e; border-radius: 4px; font-weight: 800;">📌 부모 수동지정</span>';
+          locationDesc = `수동 설정('${escapeHtml(c.landmark)}') · ${escapeHtml(c.time_diff_desc)} (${escapeHtml(c.updated_at)})`;
+        } else if (isLive) {
+          locationBadge = `<span style="font-size: 9.5px; padding: 2px 6px; background: #bbf7d0; color: #166534; border-radius: 4px; font-weight: 800;">🟢 ${escapeHtml(c.source_label || '실시간 GPS')}</span>`;
+          locationDesc = `수신: <b>${escapeHtml(c.time_diff_desc)}</b> (${escapeHtml(c.updated_at)}) | 🔋 ${c.battery_level ? c.battery_level + '%' : '--'} | ${c.is_moving ? '🏃 이동 중' : '🛑 정지'}`;
+        } else if (isStale) {
+          locationBadge = '<span style="font-size: 9.5px; padding: 2px 6px; background: #fde68a; color: #92400e; border-radius: 4px; font-weight: 800;">🟡 갱신 지연</span>';
+          locationDesc = `마지막 확인: <b>${escapeHtml(c.time_diff_desc)}</b> (${escapeHtml(c.updated_at)}) | 🔋 ${c.battery_level ? c.battery_level + '%' : '--'} — 아래 [🚨 긴급 위치 요청]으로 즉시 확인할 수 있습니다.`;
         } else {
-          locationBadge = '<span style="font-size: 9px; padding: 2px 6px; background: #bbf7d0; color: #166534; border-radius: 4px; font-weight: 800;">실시간 GPS</span>';
-          locationDesc = `GPS 수신: ${c.time_diff_desc} (${c.updated_at}) | 🔋 ${c.battery_level ? c.battery_level + '%' : '--'} | ${c.is_moving ? '🏃 이동 중' : '🛑 정지'}`;
+          locationBadge = '<span style="font-size: 9.5px; padding: 2px 6px; background: #fecdd3; color: #be123c; border-radius: 4px; font-weight: 800;">🔴 실시간 끊김</span>';
+          locationDesc = `⚠️ 오래된 마지막 기록: <b>${escapeHtml(c.time_diff_desc)}</b> (${escapeHtml(c.updated_at)}) · 아이폰 백그라운드 동결 상태입니다. [🚨 긴급 위치 요청] 또는 단축어 자동화를 활용해 주세요.`;
         }
       } else {
-        if (isOnline) {
-          locationTitle = "📍 실시간 접속 중 (GPS 수신 대기)";
-          locationDesc = "🟢 자녀가 스마트폰에서 앱에 접속 중입니다! 위치 권한이 허용되면 곧 실시간 GPS가 지도에 표시됩니다.";
-        } else {
-          locationTitle = "📍 위치 미수신";
-          locationDesc = "⚠️ 자녀 스마트폰에서 앱을 실행하고 로그인해야 실시간 위치가 전송됩니다. 필요 시 아래 버튼으로 위치를 직접 지정하세요.";
-        }
+        locationTitle = "📍 실시간 GPS 미수신";
+        locationBadge = '<span style="font-size: 9.5px; padding: 2px 6px; background: #e2e8f0; color: #475569; border-radius: 4px; font-weight: 800;">미수신</span>';
+        locationDesc = "⚠️ 자녀 아이폰에서 앱 실행 및 위치 허용 후 실시간 위치가 표시됩니다.";
       }
+
+      const pushPill = c.has_push_subscription
+        ? '<span style="font-size: 9.5px; font-weight: 800; padding: 2px 6px; border-radius: 8px; background: #dcfce7; color: #166534;">🔔 푸시연결</span>'
+        : '<span style="font-size: 9.5px; font-weight: 800; padding: 2px 6px; border-radius: 8px; background: #f1f5f9; color: #64748b;">🔕 푸시미등록</span>';
+      const shortcutPill = c.shortcut_last_used_at
+        ? `<span style="font-size: 9.5px; font-weight: 800; padding: 2px 6px; border-radius: 8px; background: #e0f2fe; color: #0369a1;">⚡ 단축어 연동됨</span>`
+        : "";
+      const safeUname = String(c.username || "").replace(/'/g, "\\'");
+      const safeName = String(c.name || "").replace(/'/g, "\\'");
+      const safeRole = String(c.role_title || "").replace(/'/g, "\\'");
+      const isTrailOpen = AppState._activeTrailUser === c.username;
 
       return `
         <div class="item-card" style="margin-top: 10px; border-radius: 12px; padding: 12px; border: 1.5px solid ${cardBorder}; background: ${cardBg};">
-          <!-- 상단: 이름 + 로그인 실시간 접속 뱃지 -->
-          <div class="item-card-top" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <!-- 상단: 이름 + 로그인 실시간 접속 뱃지 + 푸시 연결 상태 -->
+          <div class="item-card-top" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 4px;">
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="font-size: 16px;">${c.avatar}</span>
-              <span style="font-weight: 800; font-size: 14px; color: #1e293b;">${c.role_title} (${c.name})</span>
+              <span style="font-weight: 800; font-size: 14px; color: #1e293b;">${escapeHtml(c.role_title)} (${escapeHtml(c.name)})</span>
             </div>
-            <div style="display: flex; gap: 4px; align-items: center;">
+            <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+              ${pushPill}
+              ${shortcutPill}
               <span style="font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 12px; background: ${sessionBadgeBg}; color: white;">
-                ${c.login_badge}
+                ${escapeHtml(c.login_badge)}
               </span>
             </div>
           </div>
 
           <!-- 중단: 위치 안내 영역 -->
           <div style="background: white; border-radius: 8px; padding: 8px 10px; border: 1px solid #e2e8f0; margin-bottom: 8px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-bottom: 3px;">
               <span style="font-size: 13px; font-weight: 800; color: #0f172a;">${locationTitle}</span>
               ${locationBadge}
             </div>
-            <div style="font-size: 11px; color: #64748b; line-height: 1.4;">
+            <div style="font-size: 11px; color: #475569; line-height: 1.45;">
               ${locationDesc}
             </div>
-            ${c.device_info ? `<div style="font-size: 10px; color: #94a3b8; margin-top: 3px;">최근 활동: ${c.login_desc} (${c.device_info})</div>` : ''}
+            ${c.device_info ? `<div style="font-size: 10px; color: #94a3b8; margin-top: 3px;">최근 앱 활동: ${escapeHtml(c.login_desc)} (${escapeHtml(c.device_info)})</div>` : ''}
           </div>
 
           <!-- 하단 액션 버튼 -->
-          <div class="child-card-actions" style="display: flex; gap: 6px;">
-            <button class="btn-card-action" onclick="openManualLocationModal('${c.username}', '${c.name}', '${c.role_title}')" style="flex: 1; padding: 6px 10px; font-size: 11px; font-weight: 700; border-radius: 6px; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; cursor: pointer;">
-              📍 위치 직접 설정/수정
+          <div class="child-card-actions" style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button class="btn-card-action" onclick="sendChildLocationPing('${safeUname}', '${safeName}')" style="flex: 1.3; padding: 7px 10px; font-size: 11px; font-weight: 800; border-radius: 7px; border: 1px solid #f43f5e; background: #fff1f2; color: #be123c; cursor: pointer;">
+              🚨 긴급 위치 요청 (푸시)
             </button>
-            <button class="btn-card-action" onclick="sendChildLocationPing('${c.username}', '${c.name}')" style="flex: 1; padding: 6px 10px; font-size: 11px; font-weight: 700; border-radius: 6px; border: 1px solid #7dd3fc; background: #e0f2fe; color: #0284c7; cursor: pointer;">
-              📲 위치 요청 톡 전송
+            <button class="btn-card-action" onclick="toggleChildHistoryTrail('${safeUname}', '${safeRole}', '${safeName}')" style="flex: 1; padding: 7px 8px; font-size: 11px; font-weight: 800; border-radius: 7px; border: 1px solid ${isTrailOpen ? '#0284c7' : '#bae6fd'}; background: ${isTrailOpen ? '#0284c7' : '#e0f2fe'}; color: ${isTrailOpen ? 'white' : '#0369a1'}; cursor: pointer;">
+              👣 ${isTrailOpen ? '동선 숨기기' : `동선 보기 (${c.history_count || 0})`}
+            </button>
+            <button class="btn-card-action" onclick="openManualLocationModal('${safeUname}', '${safeName}', '${safeRole}')" style="flex: 0.9; padding: 7px 8px; font-size: 11px; font-weight: 700; border-radius: 7px; border: 1px solid #cbd5e1; background: #f8fafc; color: #334155; cursor: pointer;">
+              📌 수동지정
             </button>
           </div>
         </div>
@@ -3757,6 +4066,9 @@ async function initSafetyKakaoMap(children) {
     initKakaoSafetyMap(container, children);
   } else {
     initLeafletSafetyMap(container, children);
+  }
+  if (AppState._activeTrailUser && AppState._activeTrailPoints && AppState._activeTrailPoints.length >= 2) {
+    renderTrailOnSafetyMap(AppState._activeTrailPoints, AppState._activeTrailUser);
   }
 }
 
@@ -3970,17 +4282,120 @@ async function submitManualLocation() {
 
 async function sendChildLocationPing(username, name) {
   try {
-    await fetch("/api/location/request-ping", {
+    const res = await fetch("/api/location/request-ping", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         child_username: username,
-        requester_name: AppState.currentUser ? AppState.currentUser.name : "아빠"
+        requester_name: AppState.currentUser ? (AppState.currentUser.role_title || AppState.currentUser.name) : "아빠"
       })
     });
-    showToastNotice(`📲 ${name}에게 실시간 위치 요청 톡을 전송했습니다!`);
+    const d = await res.json();
+    showToastNotice(d.message || `🚨 ${name}에게 긴급 위치 확인 요청을 전송했습니다!`);
   } catch (e) {
-    alert("위치 요청 전송에 실패했습니다.");
+    showToastNotice("위치 요청 전송에 실패했습니다.");
+  }
+}
+
+// 선택한 자녀의 최근 이동 동선(location_history) 지도 폴리라인 및 타임라인 표출
+async function toggleChildHistoryTrail(username, roleTitle, name) {
+  const box = document.getElementById("safetyHistoryTimeline");
+  if (AppState._activeTrailUser === username) {
+    AppState._activeTrailUser = null;
+    AppState._activeTrailPoints = [];
+    if (box) box.style.display = "none";
+    await fetchFamilyLocations(true);
+    return;
+  }
+  AppState._activeTrailUser = username;
+  if (box) {
+    box.style.display = "block";
+    box.innerHTML = `<div style="font-size: 11.5px; color: #64748b;">👣 ${escapeHtml(roleTitle)}(${escapeHtml(name)}) 최근 이동 동선 조회 중...</div>`;
+  }
+  try {
+    const res = await fetch(`/api/location/history?username=${encodeURIComponent(username)}&limit=30`);
+    const data = await res.json();
+    const items = data.items || [];
+    AppState._activeTrailPoints = items;
+
+    if (box) {
+      if (items.length === 0) {
+        box.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:12px; font-weight:800; color:#334155;">👣 ${escapeHtml(roleTitle)} 이동 동선 기록</span>
+            <button onclick="toggleChildHistoryTrail('${String(username).replace(/'/g, "\\'")}', '', '')" style="border:none; background:#e2e8f0; border-radius:6px; padding:2px 8px; font-size:11px; cursor:pointer;">닫기</button>
+          </div>
+          <div style="font-size:11.5px; color:#64748b; margin-top:6px;">아직 누적된 이동 동선 기록이 없습니다. 자녀가 위치를 보고하거나 단축어 자동화가 실행되면 여기에 경로가 쌓입니다.</div>
+        `;
+      } else {
+        const recentDesc = items.slice(-6).reverse();
+        const srcIcon = { IOS_SHORTCUT: "⚡단축어", PING_REPLY: "📲요청회신", MANUAL: "📌수동", WEB_GPS: "📡GPS" };
+        box.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span style="font-size:12px; font-weight:800; color:#0369a1;">👣 ${escapeHtml(roleTitle)}(${escapeHtml(name)}) 최근 동선 (총 ${items.length}개 지점)</span>
+            <button onclick="toggleChildHistoryTrail('${String(username).replace(/'/g, "\\'")}', '', '')" style="border:none; background:#e2e8f0; border-radius:6px; padding:2px 8px; font-size:11px; font-weight:700; cursor:pointer;">닫기</button>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:5px; max-height:140px; overflow-y:auto;">
+            ${recentDesc.map((pt, i) => `
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; background:white; border:1px solid #e2e8f0; border-radius:8px; padding:5px 8px; font-size:11px;">
+                <div style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                  <span style="font-weight:800; color:${i === 0 ? '#0284c7' : '#475569'};">${i === 0 ? '📍최신' : '•'} ${escapeHtml(pt.landmark || pt.address)}</span>
+                </div>
+                <div style="flex-shrink:0; font-size:10px; color:#64748b;">
+                  ${srcIcon[pt.source] || '📡'} ${escapeHtml((pt.created_at || '').slice(5, 16))}
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        `;
+      }
+    }
+
+    // 지도에 폴리라인 렌더링
+    renderTrailOnSafetyMap(items, username);
+    // 버튼 활성 상태 반영을 위해 목록만 가볍게 갱신하지 않고 버튼 텍스트는 다음 폴링에 자동 반영
+  } catch (e) {
+    if (box) box.innerHTML = `<div style="font-size:11.5px; color:#dc2626;">동선 정보를 불러오지 못했습니다.</div>`;
+  }
+}
+window.toggleChildHistoryTrail = toggleChildHistoryTrail;
+
+function renderTrailOnSafetyMap(items, username) {
+  if (!items || items.length < 2) return;
+  const lineColor = (username === "도비사랑녀") ? "#f59e0b" : "#ec4899";
+
+  // 기존 트레일 정리
+  if (AppState._safetyTrailLayer) {
+    try {
+      if (AppState._safetyTrailLayer.setMap) AppState._safetyTrailLayer.setMap(null);
+      else if (AppState._safetyTrailLayer.remove) AppState._safetyTrailLayer.remove();
+    } catch (e) {}
+    AppState._safetyTrailLayer = null;
+  }
+
+  if (AppState.kakaoSafetyMap && typeof kakao !== "undefined" && kakao.maps) {
+    const path = items.map(p => new kakao.maps.LatLng(Number(p.latitude), Number(p.longitude)));
+    const poly = new kakao.maps.Polyline({
+      path: path,
+      strokeWeight: 4,
+      strokeColor: lineColor,
+      strokeOpacity: 0.85,
+      strokeStyle: "shortdash"
+    });
+    poly.setMap(AppState.kakaoSafetyMap);
+    AppState._safetyTrailLayer = poly;
+    try {
+      const bounds = new kakao.maps.LatLngBounds();
+      path.forEach(pt => bounds.extend(pt));
+      AppState.kakaoSafetyMap.setBounds(bounds);
+    } catch (e) {}
+  } else if (AppState.leafletSafetyMap && typeof L !== "undefined") {
+    const latlngs = items.map(p => [Number(p.latitude), Number(p.longitude)]);
+    const poly = L.polyline(latlngs, { color: lineColor, weight: 4, dashArray: "6,6", opacity: 0.85 }).addTo(AppState.leafletSafetyMap);
+    AppState._safetyTrailLayer = poly;
+    try {
+      AppState.leafletSafetyMap.fitBounds(poly.getBounds(), { padding: [35, 35], maxZoom: 16 });
+    } catch (e) {}
   }
 }
 
@@ -3989,82 +4404,63 @@ function requestChildLocationRefresh() {
   openSafetyModal();
 }
 
-// 자녀 스마트폰에서 백그라운드 GPS 위치 자동 전송 및 상주 유지
-function startChildLocationTracker() {
-  if (!navigator.geolocation || !AppState.currentUser) return;
-  const isChild = (AppState.currentUser.role_type === "CHILD" || AppState.currentUser.username === "도비사랑녀" || AppState.currentUser.username === "미니미니채");
-  if (!isChild) return;
+// 화면 복귀/타이머 시 스로틀 기반 단일 자녀 위치 동기화 (중복 호출·권한 거부 루프 차단)
+async function triggerThrottledChildSync() {
+  if (!navigator.geolocation || !isChildUser(AppState.currentUser) || isInAppBrowser()) return;
+  if (document.visibilityState && document.visibilityState !== "visible") return;
+  if (AppState._lastReportedGpsPerm === "DENIED") return;
+  const permState = await queryGeoPermissionState();
+  if (permState === "denied") {
+    await reportGpsPermissionStatus("DENIED");
+    return;
+  }
+  // 최근 25초 이내 이미 보고했으면 스킵
+  if (AppState._lastChildReportMeta && (Date.now() - AppState._lastChildReportMeta.ts < 25000)) {
+    return;
+  }
+  try {
+    const pos = await acquireBestPosition(true);
+    await reportChildLocationToServer(pos, { source: "WEB_GPS" });
+  } catch (err) {
+    if (err && err.code === 1) {
+      await reportGpsPermissionStatus("DENIED");
+    } else if (err && (err.code === 2 || err.code === 3)) {
+      await reportGpsPermissionStatus("TIMEOUT");
+    }
+  }
+}
 
-  async function reportPos(pos) {
-    if (!AppState.currentUser) return;
-    const lat = pos.coords.latitude;
-    const lon = pos.coords.longitude;
-    const acc = pos.coords.accuracy;
+// 자녀 스마트폰 단일 스마트 위치 추적 엔진 (1초 7회 중복 폭주 제거 + 실내 폴백 + 권한 거부 시 조용히 정지)
+function startChildLocationTracker(opts = {}) {
+  if (!navigator.geolocation || !isChildUser(AppState.currentUser) || isInAppBrowser()) return;
 
-    let batteryLevel = 88;
-    try {
-      if (navigator.getBattery) {
-        const b = await navigator.getBattery();
-        batteryLevel = Math.round(b.level * 100);
-      }
-    } catch (e) {}
-
-    try {
-      await fetch("/api/location/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: AppState.currentUser.username,
-          latitude: lat,
-          longitude: lon,
-          accuracy: acc,
-          battery_level: batteryLevel,
-          is_moving: false
-        })
-      });
-      console.log(`[GPS] 자녀(${AppState.currentUser.username}) 백그라운드 위치 보고 성공 (${new Date().toLocaleTimeString()})`);
-    } catch (e) {}
+  if (!opts.skipImmediatePing) {
+    triggerThrottledChildSync();
   }
 
-  function triggerImmediatePing() {
-    navigator.geolocation.getCurrentPosition(
-      reportPos,
-      (err) => console.warn("GPS ping error:", err),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
-    );
-  }
-
-  // 1. 즉시 1회 위치 리포트
-  triggerImmediatePing();
-
-  // 2. 실시간 지속 감시 (watchPosition)
+  // 1. 실시간 이동 감시 (watchPosition - 단일 게이트 reportChildLocationToServer가 25초/25m 자동 스로틀)
   try {
     if (AppState._geoWatchId) navigator.geolocation.clearWatch(AppState._geoWatchId);
     AppState._geoWatchId = navigator.geolocation.watchPosition(
-      reportPos,
-      (err) => console.warn("GPS watch error:", err),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+      (pos) => { reportChildLocationToServer(pos, { source: "WEB_GPS" }); },
+      (err) => {
+        if (err && err.code === 1) {
+          reportGpsPermissionStatus("DENIED");
+          if (AppState._geoWatchId) {
+            navigator.geolocation.clearWatch(AppState._geoWatchId);
+            AppState._geoWatchId = null;
+          }
+        }
+      },
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 30000 }
     );
   } catch (e) {}
 
-  // 3. 45초 간격 하트비트 핑 (메모리 상주 유지)
+  // 2. 60초 간격 포그라운드 동기화 (화면이 켜져 있고 권한이 허용된 상태에서만 동작)
   if (AppState._childPingTimer) clearInterval(AppState._childPingTimer);
   AppState._childPingTimer = setInterval(() => {
-    triggerImmediatePing();
-  }, 45000);
-
-  // 4. 모바일 백그라운드 복귀 & BFCache 즉각 반응 (화면 켜지자마자 0.1초 동기화)
-  if (!window._keepAliveListenersBound) {
-    window._keepAliveListenersBound = true;
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") {
-        console.log("[KeepAlive] 화면 복귀 감지 -> 자녀 위치 즉시 동기화");
-        triggerImmediatePing();
-      }
-    });
-    window.addEventListener("pageshow", triggerImmediatePing);
-    window.addEventListener("focus", triggerImmediatePing);
-  }
+    triggerThrottledChildSync();
+  }, 60000);
 }
 
 // 홈 화면 즐겨찾기 교통 카드 양방향(가는 길 ⇄ 오는 길) 토글
@@ -4084,12 +4480,175 @@ function toggleRouteDetailDirection(routeId, isReverse) {
 }
 window.toggleRouteDetailDirection = toggleRouteDetailDirection;
 
-// 스마트폰 백그라운드 상주 가이드 모달 열기/닫기/탭 전환
-function openKeepAliveGuideModal() {
+// 스마트폰 백그라운드/추적창 차단/단축어 자동화 가이드 모달 열기/닫기/탭 전환
+function openKeepAliveGuideModal(defaultTab = "iphone") {
   const m = document.getElementById("modalKeepAliveGuide");
   if (m) m.className = "modal-overlay active";
+  switchKeepAliveTab(defaultTab || "iphone");
+  loadShortcutConfigsInGuide();
 }
 window.openKeepAliveGuideModal = openKeepAliveGuideModal;
+
+async function loadShortcutConfigsInGuide() {
+  const container = document.getElementById("shortcutConfigContainer");
+  if (!container) return;
+  if (!AppState.token) {
+    container.innerHTML = `<div style="font-size: 11px; color: #64748b;">로그인 후 자녀별 단축어 웹훅 URL과 전용 키를 복사할 수 있습니다.</div>`;
+    return;
+  }
+  try {
+    const res = await fetch("/api/location/shortcut-config");
+    if (!res.ok) return;
+    const data = await res.json();
+    const list = data.configs || [];
+    if (list.length === 0) return;
+
+    const webhookUrl = list[0].webhook_url || "https://family.danminlove.com/api/location/shortcut-webhook";
+    container.innerHTML = `
+      <div style="background: white; border: 1px solid #bfdbfe; border-radius: 9px; padding: 8px 10px; font-size: 11px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+          <strong style="color:#1e3a8a;">🌐 공통 웹훅 URL</strong>
+          <button onclick="copyShortcutText('${webhookUrl}', '웹훅 URL')" style="border:none; background:#0284c7; color:white; border-radius:6px; padding:3px 8px; font-size:10.5px; font-weight:800; cursor:pointer;">📋 복사</button>
+        </div>
+        <div style="font-family:monospace; font-size:10px; color:#475569; word-break:break-all; margin-top:3px;">${escapeHtml(webhookUrl)}</div>
+      </div>
+      ${list.map(c => {
+        const safeKey = String(c.api_key || "").replace(/'/g, "\\'");
+        const safeRole = String(c.role_title || c.username).replace(/'/g, "\\'");
+        return `
+          <div style="background: white; border: 1px solid #bfdbfe; border-radius: 9px; padding: 8px 10px; font-size: 11px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+              <strong style="color:#0f172a;">${c.avatar || '🔑'} ${escapeHtml(c.role_title)} (${escapeHtml(c.name)}) 전용 key</strong>
+              <button onclick="copyShortcutText('${safeKey}', '${safeRole} 단축어 키')" style="border:none; background:#10b981; color:white; border-radius:6px; padding:3px 8px; font-size:10.5px; font-weight:800; cursor:pointer;">📋 키 복사</button>
+            </div>
+            <div style="font-family:monospace; font-size:10.5px; color:#0369a1; word-break:break-all; margin-top:3px;">${escapeHtml(c.api_key || '')}</div>
+            <div style="font-size:10px; color:#64748b; margin-top:2px;">최근 자동전송: ${escapeHtml(c.last_used_at || '아직 연동 전')}</div>
+          </div>
+        `;
+      }).join("")}
+    `;
+  } catch (e) {}
+}
+
+async function copyShortcutText(txt, label) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(txt);
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = txt;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    showToastNotice(`📋 ${label}이(가) 복사되었습니다!`);
+  } catch (e) {
+    showToastNotice("복사에 실패했습니다. 길게 눌러 직접 복사해 주세요.");
+  }
+}
+window.copyShortcutText = copyShortcutText;
+
+// Web Push VAPID 공개키 Base64URL -> Uint8Array 변환
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+// 실제 Web Push(iOS 16.4+ 홈화면 PWA APNs / Android FCM) 구독 등록
+async function subscribeWebPush(interactive = true) {
+  if (!AppState.token) {
+    if (interactive) requireFamilyLogin("긴급 푸시 알림");
+    return false;
+  }
+  const isIos = /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+  const isStandalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  if (isIos && !isStandalone) {
+    if (interactive) {
+      showToastNotice("🍎 아이폰은 [공유 ➔ 홈 화면에 추가]로 설치한 앱에서 열어야 잠금화면 긴급 알림이 켜집니다!");
+      openKeepAliveGuideModal("iphone");
+    }
+    return false;
+  }
+  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+    if (interactive) showToastNotice("이 브라우저는 백그라운드 웹 푸시를 지원하지 않습니다.");
+    return false;
+  }
+  try {
+    const perm = Notification.permission === "granted" ? "granted" : (interactive ? await Notification.requestPermission() : Notification.permission);
+    if (perm !== "granted") {
+      if (interactive) showToastNotice("알림 권한이 허용되지 않았습니다. 설정에서 알림을 허용해 주세요.");
+      return false;
+    }
+
+    const keyRes = await fetch("/api/push/vapid-public-key");
+    const keyData = await keyRes.json();
+    if (!keyData.available || !keyData.public_key) {
+      if (interactive) showToastNotice("서버 푸시 키 준비 중입니다. 잠시 후 다시 시도해 주세요.");
+      return false;
+    }
+
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyData.public_key)
+      });
+    }
+    const subJson = sub.toJSON();
+    const saveRes = await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(subJson)
+    });
+    if (saveRes.ok) {
+      syncPushButtonState(true);
+      if (interactive) {
+        showToastNotice("🔔 잠금화면 긴급 호출 & 가족톡 푸시 알림이 연결되었습니다!");
+      }
+      return true;
+    }
+  } catch (err) {
+    console.warn("Web Push subscribe error:", err);
+    if (interactive) showToastNotice("푸시 등록 중 오류가 발생했습니다. 홈 화면 앱에서 다시 시도해 주세요.");
+  }
+  return false;
+}
+window.subscribeWebPush = subscribeWebPush;
+
+async function syncPushButtonState(forceSubscribed = null) {
+  const childBtn = document.getElementById("btnChildPushSubscribe");
+  const chatBtn = document.getElementById("btnRequestNotify");
+  if (!AppState.token) return;
+  let subscribed = forceSubscribed;
+  if (subscribed === null) {
+    try {
+      const res = await fetch("/api/push/status");
+      if (res.ok) {
+        const d = await res.json();
+        subscribed = Boolean(d.subscribed);
+      }
+    } catch (e) {}
+  }
+  if (subscribed) {
+    if (childBtn) {
+      childBtn.textContent = "🔔 긴급 알림 켜짐";
+      childBtn.style.background = "#dcfce7";
+      childBtn.style.color = "#15803d";
+    }
+    if (chatBtn) {
+      chatBtn.textContent = "🔔 푸시 켜짐";
+      chatBtn.style.background = "#dcfce7";
+    }
+  }
+}
 
 function closeKeepAliveGuideModal(e) {
   if (e && e.target && e.target.id !== "modalKeepAliveGuide" && !e.target.classList.contains("sheet-close-btn") && !e.target.classList.contains("btn-primary")) {
@@ -4166,28 +4725,12 @@ function switchChatRoom(roomId) {
 let lastSeenChatMsgId = 0;
 
 async function requestNotificationPermission() {
-  if (!("Notification" in window)) {
-    showToast("이 브라우저는 웹 알림을 지원하지 않습니다.", "info");
-    return;
-  }
-  try {
-    const perm = await Notification.requestPermission();
-    if (perm === "granted") {
-      showToast("🔔 가족 메시지 알림이 활성화되었습니다!", "success");
-      const btn = document.getElementById("btnRequestNotify");
-      if (btn) {
-        btn.textContent = "🔔 알림 켜짐";
-        btn.style.background = "#dcfce7";
-      }
-      triggerMessageNotification({
-        sender_name: "우리가족챙기기",
-        text: "가족 메시지 및 실시간 위치 알림이 켜졌습니다. ✨"
-      });
-    } else {
-      showToast("알림 권한이 허용되지 않았습니다. 브라우저 설정에서 허용해주세요.", "info");
-    }
-  } catch (err) {
-    console.warn("Notification permission error:", err);
+  const ok = await subscribeWebPush(true);
+  if (ok) {
+    triggerMessageNotification({
+      sender_name: "우리가족챙기기",
+      text: "잠금화면 긴급 호출 및 가족 메시지 푸시 알림이 연결되었습니다. ✨"
+    });
   }
 }
 
@@ -4610,7 +5153,8 @@ async function submitFamilyLogin() {
       closeLoginModal();
       showToast(`🎉 ${d.user.role_title} (${d.user.name}) 계정으로 로그인되었습니다!`, "success");
       sendUserHeartbeat();
-      if (d.user.role_type === "CHILD") {
+      syncPushButtonState();
+      if (isChildUser(d.user)) {
         startChildLocationTracker();
       }
       await loadFavorites();

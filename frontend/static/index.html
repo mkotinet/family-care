@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=4.0, user-scalable=yes, viewport-fit=cover">
   <title>우리가족챙기기 - 데일리 라이프 비서</title>
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <link rel="stylesheet" href="/static/style.css?v=1.8.0">
-  <link rel="manifest" href="/manifest.json?v=1.8.0">
+  <link rel="stylesheet" href="/static/style.css?v=1.9.0">
+  <link rel="manifest" href="/manifest.json?v=1.9.0">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
   <link rel="icon" type="image/png" sizes="512x512" href="/static/icons/icon-512.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/static/icons/apple-touch-icon.png">
@@ -15,7 +15,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="우리가족챙기기">
-  <meta name="app-version" content="1.8.0">
+  <meta name="app-version" content="1.9.0">
 
   <!-- Leaflet 오픈스트리트맵 엔진 (카카오맵 인증/로딩 실패 시 즉시 자동 폴백 / SRI 무결성 검증 적용) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous" referrerpolicy="no-referrer" />
@@ -101,6 +101,31 @@
         </button>
         <button class="loc-btn" id="btnRefreshLoc" onclick="refreshMyLocation()" title="내 현재 위치(GPS) 재조회">
           🔄 현위치
+        </button>
+      </div>
+    </div>
+
+    <!-- 인앱 브라우저(카카오톡/인스타 등) 접속 경고 배너 (권한 미저장 반복 팝업 방지) -->
+    <div id="inAppBrowserBanner" style="display: none; align-items: center; justify-content: space-between; gap: 8px; background: #fffbeb; border: 1.5px solid #fcd34d; border-radius: 12px; padding: 9px 12px; margin-bottom: 10px; font-size: 11.5px; color: #92400e;">
+      <div style="line-height: 1.4;">
+        <strong>⚠️ 인앱 브라우저로 열렸어요!</strong><br>
+        카톡 창에서는 위치 허용 창이 매번 뜹니다. <b>Safari 또는 홈 화면 앱</b>으로 열어주세요.
+      </div>
+      <button onclick="openKeepAliveGuideModal('iphone')" style="flex-shrink: 0; background: #f59e0b; color: white; border: none; border-radius: 8px; padding: 6px 10px; font-size: 11px; font-weight: 800; cursor: pointer;">방법 보기</button>
+    </div>
+
+    <!-- 자녀 계정 전용 원클릭 안심 위치 전송 · 긴급 푸시 · 아이폰 설정 바 -->
+    <div id="childQuickSafeBar" style="display: none; flex-direction: column; gap: 7px; background: linear-gradient(135deg, #f0f9ff 0%, #ecfdf5 100%); border: 1.5px solid #7dd3fc; border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(14,165,233,0.08);">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+        <span style="font-size: 12px; font-weight: 800; color: #0369a1;" id="childQuickStatusText">🛡️ 안심 위치 연동 대기 중</span>
+        <button onclick="openKeepAliveGuideModal('iphone')" style="border: 1px solid #bae6fd; background: white; color: #0284c7; border-radius: 7px; padding: 3px 8px; font-size: 10.5px; font-weight: 800; cursor: pointer;">🍎 추적창 끄기·자동화</button>
+      </div>
+      <div style="display: flex; gap: 6px;">
+        <button id="btnChildSendLocNow" onclick="sendChildSafeLocationNow(true)" style="flex: 1.4; border: none; background: #0284c7; color: white; border-radius: 9px; padding: 8px 10px; font-size: 12px; font-weight: 800; cursor: pointer; box-shadow: 0 2px 5px rgba(2,132,199,0.25);">
+          📍 지금 부모님께 위치 보내기
+        </button>
+        <button id="btnChildPushSubscribe" onclick="subscribeWebPush(true)" style="flex: 1; border: 1.5px solid #10b981; background: #ecfdf5; color: #047857; border-radius: 9px; padding: 8px 8px; font-size: 11.5px; font-weight: 800; cursor: pointer;">
+          🔔 긴급 알림 켜기
         </button>
       </div>
     </div>
@@ -371,13 +396,13 @@
         <span id="safetyLastCheckTime" style="font-size: 10px; color: #15803d; font-weight: 700;">방금 확인</span>
       </div>
 
-      <!-- 백그라운드 상주 설정 가이드 호출 배너 -->
-      <div style="display: flex; justify-content: space-between; align-items: center; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; cursor: pointer;" onclick="openKeepAliveGuideModal()">
+      <!-- 아이폰 추적창 영구 차단 & 무인 자동화 설정 가이드 호출 배너 -->
+      <div style="display: flex; justify-content: space-between; align-items: center; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; cursor: pointer;" onclick="openKeepAliveGuideModal('iphone')">
         <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="font-size: 14px;">📲</span>
-          <span style="font-size: 11.5px; font-weight: 700; color: #1e40af;">앱 닫아도 항상 메모리 상주 & 위치 유지 설정</span>
+          <span style="font-size: 14px;">🍎</span>
+          <span style="font-size: 11.5px; font-weight: 700; color: #1e40af;">아이폰 추적창 영구 끄기 · 단축어 무인 자동전송 · 긴급 푸시 설정</span>
         </div>
-        <span style="font-size: 11px; color: #2563eb; font-weight: 800;">설정법 보기 ➔</span>
+        <span style="font-size: 11px; color: #2563eb; font-weight: 800; flex-shrink: 0;">설정법 ➔</span>
       </div>
 
       <div class="safety-map-container">
@@ -387,6 +412,9 @@
         </div>
         <div id="kakaoSafetyMap" style="width: 100%; height: 280px; border-radius: 14px; position: relative; z-index: 1;"></div>
       </div>
+
+      <!-- 선택한 자녀의 최근 이동 동선(Breadcrumb Trail) 타임라인 영역 -->
+      <div id="safetyHistoryTimeline" style="display: none; margin-top: 10px; background: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 12px; padding: 10px 12px;"></div>
 
       <!-- 아이들 위치 카드 목록 -->
       <div class="safety-children-cards" id="safetyChildrenList">
@@ -594,46 +622,54 @@
   <div class="modal-overlay" id="modalKeepAliveGuide" onclick="closeKeepAliveGuideModal(event)">
     <div class="modal-content" style="max-width: 480px; max-height: 85vh; overflow-y: auto;" onclick="event.stopPropagation()">
       <div class="modal-header">
-        <div class="modal-title">📲 스마트폰 백그라운드 상주 설정 가이드</div>
+        <div class="modal-title">🍎 아이폰 추적창 차단 & 무인 위치 연동 가이드</div>
         <button class="sheet-close-btn" onclick="closeKeepAliveGuideModal()">✕</button>
       </div>
-      <p style="font-size: 12px; color: #64748b; margin-bottom: 14px; line-height: 1.5;">
-        스마트폰 OS(iOS/Android)는 화면이 꺼지면 배터리 절약을 위해 앱 실행을 중단합니다. <strong>아래 2가지 설정</strong>을 완료하시면 앱을 닫거나 화면이 꺼져도 백그라운드에서 실시간 위치가 끊김 없이 유지됩니다.
+      <p style="font-size: 12px; color: #64748b; margin-bottom: 12px; line-height: 1.5;">
+        아이폰(iOS)은 보안 정책상 Safari 웹페이지가 백그라운드에서 상시 실행되지 않습니다. 아래 <strong>3가지 설정</strong>을 완료하면 <strong>① 매번 뜨는 추적 팝업이 사라지고</strong>, <strong>② 긴급 호출 푸시</strong>와 <strong>③ 화면이 꺼진 상태에서도 무인 자동 위치 전송</strong>이 완벽하게 작동합니다.
       </p>
 
       <!-- 탭 선택: 아이폰 vs 갤럭시 -->
-      <div style="display: flex; gap: 8px; margin-bottom: 14px;">
-        <button id="tabGuideIphone" class="btn-filter-pill active" style="flex: 1; padding: 8px; font-weight: 800; font-size: 13px;" onclick="switchKeepAliveTab('iphone')">
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <button id="tabGuideIphone" class="btn-filter-pill active" style="flex: 1; padding: 8px; font-weight: 800; font-size: 12.5px;" onclick="switchKeepAliveTab('iphone')">
           🍎 아이폰 15 / 16 (자녀)
         </button>
-        <button id="tabGuideGalaxy" class="btn-filter-pill" style="flex: 1; padding: 8px; font-weight: 800; font-size: 13px;" onclick="switchKeepAliveTab('galaxy')">
-          🤖 갤럭시 폴드 3 / 8 (부모)
+        <button id="tabGuideGalaxy" class="btn-filter-pill" style="flex: 1; padding: 8px; font-weight: 800; font-size: 12.5px;" onclick="switchKeepAliveTab('galaxy')">
+          🤖 갤럭시 폴드 (부모)
         </button>
       </div>
 
       <!-- 아이폰 가이드 내용 -->
       <div id="guideContentIphone" style="display: block;">
-        <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 12px; margin-bottom: 10px;">
-          <div style="font-weight: 800; font-size: 13px; color: #0f172a; margin-bottom: 6px;">1단계: 홈 화면에 앱 추가 (PWA 독립 실행)</div>
-          <div style="font-size: 12px; color: #334155; line-height: 1.6;">
-            Safari 브라우저 하단의 <strong>[공유(네모 화살표)]</strong> 버튼 ➔ <strong>[홈 화면에 추가]</strong>를 누릅니다.<br>
-            <span style="font-size: 11px; color: #0284c7;">* 홈 화면 아이콘으로 실행해야 백그라운드 캐시가 안전하게 상주합니다.</span>
+        <div style="background: #fffbeb; border: 1.5px solid #fcd34d; border-radius: 12px; padding: 11px; margin-bottom: 10px;">
+          <div style="font-weight: 800; font-size: 13px; color: #92400e; margin-bottom: 5px;">🚫 1단계: 매번 뜨는 위치 추적 팝업 영구 끄기 (가장 중요!)</div>
+          <div style="font-size: 12px; color: #78350f; line-height: 1.6;">
+            1. Safari로 <strong>family.danminlove.com</strong> 접속 (카톡 창 X)<br>
+            2. 주소창 왼쪽 <strong>[가A]</strong> 또는 <strong>[페이지 메뉴 아이콘]</strong> 터치 ➔ <strong>[웹사이트 설정]</strong><br>
+            3. <strong>[위치]</strong> 항목을 기본값 '묻기'에서 👉 <strong>[허용]</strong>으로 변경!<br>
+            <span style="font-size: 11px; color: #b45309;">* iOS 설정 ➔ 개인정보 보호 및 보안 ➔ 위치 서비스 ➔ Safari 웹사이트 ➔ '앱을 사용하는 동안' + '정확한 위치 켬'도 함께 확인하세요.</span>
           </div>
         </div>
 
-        <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 12px; margin-bottom: 10px;">
-          <div style="font-weight: 800; font-size: 13px; color: #0f172a; margin-bottom: 6px;">2단계: 위치 권한 '앱을 사용하는 동안' 및 정확한 위치 켬</div>
-          <div style="font-size: 12px; color: #334155; line-height: 1.6;">
-            아이폰 <strong>[설정] ➔ [개인정보 보호 및 보안] ➔ [위치 서비스] ➔ [Safari 웹사이트(또는 가족지키미)]</strong><br>
-            ➔ 위치 허용을 <strong>[앱을 사용하는 동안]</strong>으로 선택하고, <strong>[정확한 위치]를 활성화(초록색)</strong>합니다.
+        <div style="background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 12px; padding: 11px; margin-bottom: 10px;">
+          <div style="font-weight: 800; font-size: 13px; color: #166534; margin-bottom: 5px;">🔔 2단계: 홈 화면 앱 설치 + 긴급 호출 푸시 알림 켜기</div>
+          <div style="font-size: 12px; color: #14532d; line-height: 1.6;">
+            1. Safari 하단 <strong>[공유(⎋)] ➔ [홈 화면에 추가]</strong>로 정식 앱 설치<br>
+            2. 홈 화면 아이콘으로 실행 후 상단 <strong>[🔔 긴급 알림 켜기]</strong> 터치<br>
+            <span style="font-size: 11px; color: #15803d;">* 부모가 '긴급 위치 요청'을 누르면 잠금화면에 즉시 알림이 울리고, 1번 터치 시 위치가 자동 회신됩니다!</span>
           </div>
         </div>
 
-        <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 12px;">
-          <div style="font-weight: 800; font-size: 13px; color: #0f172a; margin-bottom: 6px;">3단계: 백그라운드 앱 새로고침 활성화</div>
-          <div style="font-size: 12px; color: #334155; line-height: 1.6;">
-            아이폰 <strong>[설정] ➔ [일반] ➔ [백그라운드 앱 새로고침]</strong><br>
-            ➔ <strong>[Wi-Fi 및 셀룰러 데이터]</strong>로 켬 상태인지 확인합니다.
+        <div style="background: #eff6ff; border: 1.5px solid #93c5fd; border-radius: 12px; padding: 11px;">
+          <div style="font-weight: 800; font-size: 13px; color: #1e3a8a; margin-bottom: 5px;">⚡ 3단계: 아이폰 '단축어' 무인 백그라운드 자동화 (팝업 0회)</div>
+          <div style="font-size: 11.5px; color: #1e40af; line-height: 1.55; margin-bottom: 8px;">
+            아이폰 기본 <strong>[단축어 앱] ➔ [자동화] ➔ [+] ➔ [특정 시간 / 도착 / 출발 / 메시지 수신]</strong> 선택 (<strong>'즉시 실행'</strong> 체크) 후 아래 3개 동작만 추가하면 앱을 닫아도 무인으로 위치가 기록됩니다:<br>
+            ① <strong>현재 위치 가져오기</strong> · ② <strong>배터리 잔량 가져오기</strong><br>
+            ③ <strong>URL의 콘텐츠 가져오기</strong> (방식: <code>POST</code>, 요청 본문: <code>JSON</code>)<br>
+            &nbsp;&nbsp;• <code>key</code>: 아래 자녀 전용 키 · <code>latitude</code>: 현재 위치의 위도 · <code>longitude</code>: 현재 위치의 경도 · <code>battery</code>: 배터리 잔량
+          </div>
+          <div id="shortcutConfigContainer" style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="font-size: 11px; color: #64748b;">로그인 후 자녀별 전용 단축어 키가 표시됩니다.</div>
           </div>
         </div>
       </div>
@@ -902,7 +938,7 @@
     <span class="zoom-reset-btn" title="기본 크기로 복귀">✕ 리셋</span>
   </div>
 
-  <script src="/static/js/core.js?v=1.8.0"></script>
-  <script src="/static/app.js?v=1.8.0"></script>
+  <script src="/static/js/core.js?v=1.9.0"></script>
+  <script src="/static/app.js?v=1.9.0"></script>
 </body>
 </html>
